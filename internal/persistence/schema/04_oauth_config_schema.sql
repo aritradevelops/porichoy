@@ -1,0 +1,21 @@
+CREATE TABLE "oauth_configs" (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  client_secret TEXT NOT NULL,
+  redirect_uris TEXT[],
+  success_callback_url TEXT NOT NULL,
+  error_callback_url TEXT NOT NULL, 
+  jwt_algo varchar(10) NOT NULL,
+  jwt_secret_resolver TEXT,
+  app_id uuid NOT NUll,
+  created_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  created_by uuid NOT NULL,
+  updated_at timestamptz,
+  updated_by uuid,
+  deleted_at timestamptz,
+  deleted_by uuid,
+  PRIMARY KEY("id"),
+  FOREIGN KEY("created_by") REFERENCES "users"("id"),
+  FOREIGN KEY("updated_by") REFERENCES "users"("id"), 
+  FOREIGN KEY("deleted_by") REFERENCES "users"("id"),
+  FOREIGN KEY("app_id") REFERENCES "apps"("id")
+);

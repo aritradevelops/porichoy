@@ -1,0 +1,3 @@
+# Porichoy
+
+  Porichoy is zero to low config, secure, scalable open source self-hosted `Identity Provider` for your next `Single Sign On` system with OIDC. It additionally comes with user and role management to provide and end to end solution for your authentication and authorization needs. Our aim is to keep Porichoy codebase as simple as possible to provide better speed and understandability so other's can modify it easily to match their custom needs.

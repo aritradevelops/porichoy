@@ -1,0 +1,27 @@
+# errors
+errors:
+  "400": "Sorry! This request could not be processed!"
+  "401": "You are not authenticated to access this resource!"
+  "403": "You are not authorized to access this resource!"
+  "404": "{{.Resource}} could not be found!"
+  "422": "This request does not satisfy the given constraints!"
+  "500": "Sorry! Something went wrong."
+  "409": "Sorry! This request conflicts with the resource!"
+# controller actions
+controller:
+  list: "{{.Entity}}(s) fetched successfully."
+  create: "{{.Entity}} created successfully."
+  update: "{{.Entity}} updated successfully."
+  view: "{{.Entity}} fetched successfully."
+  delete: "{{.Entity}} deleted successfully."
+validation:
+  required: "The {{.Field}} is required."
+  min: "The {{.Field}} must be of length {{.Param}} or more."
+  unique: "The {{.Field}} must be unique."
+  email: "The given email is not valid."
+  uppercase: "The {{.Field}} must contain at least {{.Param}} uppercase letter."
+  lowercase: "The {{.Field}} must contain at least {{.Param}} lowercase letter."
+  number: "The {{.Field}} must contain at least {{.Param}} number."
+  special: "The {{.Field}} must contain at least {{.Param}} special character."
+user:
+  register: "User registered successfully."

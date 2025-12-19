@@ -1,0 +1,16 @@
+services:
+  db:
+    container_name: postgres-porichoy
+    image: postgres:15-alpine
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=admin
+      - POSTGRES_DB=porichoy
+      - POSTGRES_EXTENSIONS=pgcrypto
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./scripts:/docker-entrypoint-initdb.d
+      - postgres_data:/var/lib/postgresql/data
+volumes:
+  postgres_data:

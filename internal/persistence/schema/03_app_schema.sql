@@ -1,0 +1,20 @@
+CREATE TABLE "apps" (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  name varchar(255) NOT NULL,
+  domain varchar(255) NOT NULL,
+  landing_url varchar(255) NOT NULL,
+  logo TEXT,
+  client_id varchar(255) NOT NULL UNIQUE,
+  created_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  created_by uuid NOT NULL,
+  updated_at timestamptz,
+  updated_by uuid,
+  deactivated_at timestamptz,
+  deactivated_by uuid,
+  deleted_at timestamptz,
+  deleted_by uuid,
+  PRIMARY KEY("id"),
+  FOREIGN KEY("created_by") REFERENCES "users"("id"),
+  FOREIGN KEY("updated_by") REFERENCES "users"("id"), 
+  FOREIGN KEY("deleted_by") REFERENCES "users"("id")
+);
