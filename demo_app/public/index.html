@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Demo App</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+  <div class="container">
+    <h1>Demo App</h1>
+
+    <div class="field">
+      <label for="porichoy_url">Porichoy URL</label>
+      <input type="text" id="porichoy_url" value="http://localhost:8080/api/v1/auth/oauth2">
+    </div>
+
+    <div class="field">
+      <label for="client_id">Client ID</label>
+      <input type="text" id="client_id" value="localhost:5000">
+    </div>
+
+    <div class="field">
+      <label for="redirect_uri">Redirect URI</label>
+      <input type="text" id="redirect_uri" value="http://localhost:5000/authorize">
+    </div>
+
+    <div class="field">
+      <label for="response_type">Response Type</label>
+      <select id="response_type">
+        <option value="code">code</option>
+        <option value="token">token</option>
+      </select>
+    </div>
+
+    <div class="field">
+      <label for="code_challenge">Code Challenge</label>
+      <input type="text" id="code_challenge">
+    </div>
+
+    <div class="field">
+      <label for="code_challenge_method">Code Challenge Method</label>
+      <input type="text" id="code_challenge_method" value="S256">
+    </div>
+
+    <div class="field">
+      <label for="state">State</label>
+      <input type="text" id="state">
+    </div>
+
+    <div class="field">
+      <label for="login_hint">Login Hint</label>
+      <input type="text" id="login_hint">
+    </div>
+
+    <div class="field">
+      <label for="nonce">Nonce</label>
+      <input type="text" id="nonce">
+    </div>
+
+    <button onclick="oauth()">Sign in with Porichoy</button>
+
+    <div class="hint">
+      OAuth2 / PKCE Demo Client
+    </div>
+  </div>
+
+  <script>
+    function oauth() {
+      const client_id = document.getElementById("client_id").value;
+      const redirect_uri = document.getElementById("redirect_uri").value;
+      const response_type = document.getElementById("response_type").value;
+      const code_challenge = document.getElementById("code_challenge").value;
+      const code_challenge_method = document.getElementById("code_challenge_method").value;
+      const state = document.getElementById("state").value;
+      const login_hint = document.getElementById("login_hint").value;
+      const nonce = document.getElementById("nonce").value;
+      const porichoy_url = document.getElementById("porichoy_url").value;
+
+      const url =
+        `${porichoy_url}?client_id=${client_id}` +
+        `&redirect_uri=${redirect_uri}` +
+        `&response_type=${response_type}` +
+        `&code_challenge=${code_challenge}` +
+        `&code_challenge_method=${code_challenge_method}` +
+        `&state=${state}` +
+        `&login_hint=${login_hint}` +
+        `&nonce=${nonce}`;
+
+      window.location.href = url;
+    }
+  </script>
+</body>
+
+</html>

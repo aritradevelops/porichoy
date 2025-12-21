@@ -2,10 +2,9 @@ package validation
 
 import (
 	"slices"
-	"strconv"
 	"strings"
-	"time"
 
+	"github.com/aritradeveops/porichoy/pkg/timex"
 	"github.com/go-playground/validator/v10"
 )
 
@@ -87,17 +86,5 @@ func ValidateJWTAlgo(fl validator.FieldLevel) bool {
 
 func ValidateDuration(fl validator.FieldLevel) bool {
 	val := fl.Field().String()
-	_, err := time.ParseDuration(val)
-	if err != nil {
-		isD := val[len(val)-1] == 'd'
-		if isD {
-			rest := val[:len(val)-1]
-			_, err := strconv.Atoi(rest)
-			if err != nil {
-				return false
-			}
-			return true
-		}
-	}
-	return true
+	return timex.IsValidDuration(val)
 }

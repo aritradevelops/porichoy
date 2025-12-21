@@ -4,7 +4,9 @@ import (
 	"errors"
 
 	"github.com/aritradeveops/porichoy/internal/core/service"
+	"github.com/aritradeveops/porichoy/internal/pkg/logger"
 	"github.com/aritradeveops/porichoy/internal/pkg/translation"
+	"github.com/aritradeveops/porichoy/internal/ports/httpd/authn"
 	"github.com/gofiber/fiber/v2"
 )
 
@@ -17,6 +19,25 @@ type RegisterUserPayload struct {
 type LoginUserPayload struct {
 	Email    string `json:"email,omitempty"`
 	Password string `json:"password,omitempty"`
+}
+
+type Oauth2Payload struct {
+	ClientID            string `query:"client_id"`
+	ResponseType        string `query:"response_type"`
+	RedirectURI         string `query:"redirect_uri"`
+	CodeChallenge       string `query:"code_challenge"`
+	CodeChallengeMethod string `query:"code_challenge_method"`
+	State               string `query:"state"`
+	LoginHint           string `query:"login_hint"`
+	Nonce               string `query:"nonce"`
+}
+
+type Oauth2TokenPayload struct {
+	ClientID     string `query:"client_id"`
+	ClientSecret string `query:"client_secret"`
+	GrantType    string `query:"grant_type"`
+	Code         string `query:"code"`
+	RedirectURI  string `query:"redirect_uri"`
 }
 
 func (h *Handlers) RegisterUser(c *fiber.Ctx) error {
@@ -32,7 +53,7 @@ func (h *Handlers) RegisterUser(c *fiber.Ctx) error {
 		}
 		return err
 	}
-	return c.JSON(NewSuccessResponse(translation.Localize(c, "user.registered"), user))
+	return c.JSON(NewSuccessResponse(translation.Localize(c, "user.register"), user))
 }
 
 func (h *Handlers) LoginUser(c *fiber.Ctx) error {
@@ -44,10 +65,13 @@ func (h *Handlers) LoginUser(c *fiber.Ctx) error {
 	tokens, err := h.service.LoginUser(c.Context(), service.LoginUserPayload(payload))
 	if err != nil {
 		if errors.Is(err, service.ErrInvalidLoginCredentials) {
+			c.Status(fiber.StatusBadRequest)
 			return c.JSON(NewErrorResponse(translation.Localize(c, "user.invalid_login_credentials"), err))
 		} else if errors.Is(err, service.ErrDeactivatedUser) {
+			c.Status(fiber.StatusBadRequest)
 			return c.JSON(NewErrorResponse(translation.Localize(c, "user.deactivated_user"), err))
 		} else if errors.Is(err, service.ErrInvalidLoginMethod) {
+			c.Status(fiber.StatusBadRequest)
 			return c.JSON(NewErrorResponse(translation.Localize(c, "user.invalid_login_method"), err))
 		}
 		return err
@@ -70,10 +94,38 @@ func (h *Handlers) LoginUser(c *fiber.Ctx) error {
 	return c.JSON(NewSuccessResponse(translation.Localize(c, "user.login"), tokens))
 }
 
-func (h *Handlers) GetUserProfile(c *fiber.Ctx) error {
-	id := c.Locals("initiator").(string)
+func (h *Handlers) Oauth2(c *fiber.Ctx) error {
+	var payload Oauth2Payload
+	err := c.QueryParser(&payload)
+	if err != nil {
+		return err
+	}
+	user, err := authn.GetUserFromContext(c)
+	if err != nil {
+		return err
+	}
+	resp, err := h.service.Oauth2(c.Context(), user.UserID, service.Oauth2Payload(payload))
+	if err != nil {
+		logger.Error().Err(err).Msg("oauth2 error")
+		if resp.OauthConfig.ErrorCallbackUrl != "" {
+			return c.Redirect(resp.OauthConfig.ErrorCallbackUrl)
+		}
+		// TODO: build an oauth error page and render error properly
+		return err
+	}
 
-	return c.JSON(NewSuccessResponse(translation.Localize(c, "user.profile"), map[string]string{
-		"id": id,
-	}))
+	return c.Redirect(resp.RedirectUrl)
+}
+
+func (h *Handlers) Token(c *fiber.Ctx) error {
+	var payload Oauth2TokenPayload
+	err := c.QueryParser(&payload)
+	if err != nil {
+		return err
+	}
+	tokens, err := h.service.Token(c.Context(), service.Oauth2TokenPayload(payload))
+	if err != nil {
+		return err
+	}
+	return c.JSON(NewSuccessResponse(translation.Localize(c, "user.token"), tokens))
 }

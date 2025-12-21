@@ -1,4 +1,6 @@
-h1:Vg0IphuB7yq60rShHh+5eNTRAt6zcCkyBoHEuZ6LQaM=
+h1:YAFAh6+X+6Ikseenm8g6/bkMui54oQ1z+fwMlO9T0m8=
 20251213143147_initial_schema.sql h1:9UKI9AAb5CCV/JlG84YrF99vQ1pO9phMCzUZeqro9Vk=
 20251214113025_user_changes.sql h1:Uat73fgSRdX7d/g8/Sb9sIb6O3dxAKr/3wb0aSyXGDE=
-20251216063411_app_and_oauth.sql h1:i9v2CG14BNHOzmsbj8d5905aGkOj5/8u54k/COJ/yKQ=
+20251216063411_app_and_oauth.sql h1:KQS6LCrDzEwY7e8QTndW/Y0OGyVejH0vYwpS7A2hORU=
+20251219142017_oauth_call.sql h1:/ZXECt1ul+1xjskjPA7z5vK+vnSDAfxAwiWYeqWHsSU=
+20251220143853_app_client_secret.sql h1:uu52o4/S3Ea2dlYT2LyLsCRCGgFouS9+icbuc8pIaDA=

@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/aritradeveops/porichoy/internal/core/cryptoutil"
 	"github.com/aritradeveops/porichoy/internal/core/validation"
@@ -11,15 +12,18 @@ import (
 )
 
 type CreateAppPayload struct {
-	Name               string   `json:"name" validate:"required,min=3"`
-	Domain             string   `json:"domain" validate:"required,fqdn"`
-	LandingUrl         string   `json:"landing_url" validate:"required,url"`
-	Logo               string   `json:"logo,omitempty" validate:"omitempty,url"`
-	RedirectUris       []string `json:"redirect_uris" validate:"required,min=1,dive,url"`
-	SuccessCallbackUrl string   `json:"success_callback_url" validate:"required,url"`
-	ErrorCallbackUrl   string   `json:"error_callback_url" validate:"required,url"`
-	JwtAlgo            string   `json:"jwt_algo" validate:"required,jwt_algo"`
-	JwtSecretResolver  string   `json:"jwt_secret_resolver" validate:"required,resolver"`
+	Name string `json:"name" validate:"required,min=3"`
+	// TODO: think about this field
+	Domain               string   `json:"domain" validate:"required"`
+	LandingUrl           string   `json:"landing_url" validate:"required,url"`
+	Logo                 string   `json:"logo,omitempty" validate:"omitempty,url"`
+	RedirectUris         []string `json:"redirect_uris" validate:"required,min=1,dive,url"`
+	SuccessCallbackUrl   string   `json:"success_callback_url" validate:"required,url"`
+	ErrorCallbackUrl     string   `json:"error_callback_url" validate:"required,url"`
+	JwtAlgo              string   `json:"jwt_algo" validate:"required,jwt_algo"`
+	JwtSecretResolver    string   `json:"jwt_secret_resolver" validate:"required,resolver"`
+	JwtLifetime          string   `json:"jwt_lifetime" validate:"required,duration"`
+	RefreshTokenLifetime string   `json:"refresh_token_lifetime" validate:"required,duration"`
 }
 
 func (s *Service) CreateApp(ctx context.Context, initiator string, payload CreateAppPayload) (repository.App, error) {
@@ -48,6 +52,8 @@ func (s *Service) CreateApp(ctx context.Context, initiator string, payload Creat
 	if err != nil {
 		return app, err
 	}
+
+	fmt.Println(clientSecret)
 
 	err = s.repository.CreateOauthInfo(ctx, repository.CreateOauthInfoParams{
 		ClientSecret:       clientSecret,

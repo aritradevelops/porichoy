@@ -9,15 +9,17 @@ import (
 )
 
 type CreateAppPayload struct {
-	Name               string   `json:"name"`
-	Domain             string   `json:"domain"`
-	LandingUrl         string   `json:"landing_url"`
-	Logo               string   `json:"logo"`
-	RedirectUris       []string `json:"redirect_uris"`
-	SuccessCallbackUrl string   `json:"success_callback_url"`
-	ErrorCallbackUrl   string   `json:"error_callback_url"`
-	JwtAlgo            string   `json:"jwt_algo"`
-	JwtSecretResolver  string   `json:"jwt_secret_resolver"`
+	Name                 string   `json:"name"`
+	Domain               string   `json:"domain"`
+	LandingUrl           string   `json:"landing_url"`
+	Logo                 string   `json:"logo"`
+	RedirectUris         []string `json:"redirect_uris"`
+	SuccessCallbackUrl   string   `json:"success_callback_url"`
+	ErrorCallbackUrl     string   `json:"error_callback_url"`
+	JwtAlgo              string   `json:"jwt_algo"`
+	JwtSecretResolver    string   `json:"jwt_secret_resolver"`
+	JwtLifetime          string   `json:"jwt_lifetime" validate:"required,duration"`
+	RefreshTokenLifetime string   `json:"refresh_token_lifetime" validate:"required,duration"`
 }
 
 func (h *Handlers) CreateApp(c *fiber.Ctx) error {
@@ -39,6 +41,6 @@ func (h *Handlers) CreateApp(c *fiber.Ctx) error {
 	}
 
 	return c.JSON(NewSuccessResponse(translation.Localize(c, "controller.create", map[string]string{
-		"Resource": "App",
+		"Entity": "App",
 	}), app))
 }

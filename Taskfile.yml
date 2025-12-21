@@ -16,6 +16,10 @@ tasks:
     cmd: docker-compose -f ./deps/docker/postgres/docker-compose.yml up -d
   stop_db:
     cmd: docker-compose -f ./deps/docker/postgres/docker-compose.yml down
+  run_demo_app:
+    cmd: go run demo_app/main.go
+  run_demo_app:watch:
+    cmd: cd demo_app && air
   migration:generate:
     cmds:
       - |
@@ -26,3 +30,5 @@ tasks:
     cmd: atlas migrate apply --env local
   migration:rehash:
     cmd: atlas migrate hash --dir "file://internal/persistence/migrations"
+  generate:repository:
+    cmd: sqlc generate

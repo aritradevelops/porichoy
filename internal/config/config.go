@@ -2,10 +2,10 @@ package config
 
 import (
 	"os"
-	"strconv"
-	"time"
 
 	"github.com/aritradeveops/porichoy/internal/core/validation"
+	"github.com/aritradeveops/porichoy/pkg/timex"
+	_ "github.com/joho/godotenv/autoload"
 	"go.yaml.in/yaml/v3"
 )
 
@@ -19,28 +19,24 @@ type Database struct {
 }
 
 type JWT struct {
-	Algorithm            string `yaml:"algorithm" validate:"required"`
-	SigningKeyResolver   string `yaml:"signing_key_resolver" validate:"required,resolver"`
-	VerifyingKeyResolver string `yaml:"verifying_key_resolver" validate:"required,resolver"`
-	Lifetime             string `yaml:"lifetime" validate:"required,duration"`
+	Algorithm            string         `yaml:"algorithm" validate:"required"`
+	SigningKeyResolver   string         `yaml:"signing_key_resolver" validate:"required,resolver"`
+	VerifyingKeyResolver string         `yaml:"verifying_key_resolver" validate:"required,resolver"`
+	Lifetime             timex.Duration `yaml:"lifetime" validate:"required,duration"`
 }
 
-func (j JWT) ParsedLifetime() time.Duration {
-	duration, err := time.ParseDuration(j.Lifetime)
-	if err != nil {
-		isD := j.Lifetime[len(j.Lifetime)-1] == 'd'
-		if isD {
-			rest := j.Lifetime[:len(j.Lifetime)-1]
-			days, _ := strconv.Atoi(rest)
-			return time.Duration(days) * 24 * time.Hour
-		}
-	}
-	return duration
+type RefreshToken struct {
+	Lifetime timex.Duration `yaml:"lifetime" validate:"required,duration"`
+}
+
+type Oauth struct {
+	Lifetime timex.Duration `yaml:"lifetime" validate:"required,duration"`
 }
 
 type Authentication struct {
-	JWT                  JWT    `yaml:"jwt" validate:"required"`
-	RefreshTokenLifetime string `yaml:"refresh_token_lifetime" validate:"required,duration"`
+	JWT          JWT          `yaml:"jwt" validate:"required"`
+	RefreshToken RefreshToken `yaml:"refresh_token" validate:"required"`
+	Oauth        Oauth        `yaml:"oauth" validate:"required"`
 }
 
 type Config struct {

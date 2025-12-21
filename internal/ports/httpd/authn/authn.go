@@ -11,15 +11,25 @@ import (
 
 const authUserKey = "auth_user"
 
-func Middleware(conf config.JWT) fiber.Handler {
+func Middleware(conf config.JWT, redirect ...bool) fiber.Handler {
 	return func(c *fiber.Ctx) error {
 		bearer := c.Get("Authorization")
 		if bearer == "" {
+			bearer = c.Cookies("access_token")
+		}
+		if bearer == "" {
+
+			if len(redirect) > 0 && redirect[0] {
+				return c.Redirect("/login?next=" + string(c.Request().URI().QueryString()))
+			}
 			return fiber.ErrUnauthorized
 		}
 		accessToken := strings.TrimPrefix(bearer, "Bearer ")
 		payload, err := jwtutil.Verify(conf.Algorithm, accessToken, conf.VerifyingKeyResolver)
 		if err != nil {
+			if len(redirect) > 0 && redirect[0] {
+				return c.Redirect("/login?next=" + string(c.Request().URI().QueryString()))
+			}
 			return fiber.ErrUnauthorized
 		}
 		c.Locals(authUserKey, payload)
@@ -27,14 +37,14 @@ func Middleware(conf config.JWT) fiber.Handler {
 	}
 }
 
-func GetUserFromContext(c *fiber.Ctx) (jwtutil.JwtPayload, error) {
+func GetUserFromContext(c *fiber.Ctx) (*jwtutil.JwtPayload, error) {
 	userIn := c.Locals(authUserKey)
 	if userIn == nil {
-		return jwtutil.JwtPayload{}, fmt.Errorf("AuthenticatedUser is only available for protected routes")
+		return nil, fmt.Errorf("AuthenticatedUser is only available for protected routes")
 	}
-	payload, ok := userIn.(jwtutil.JwtPayload)
+	payload, ok := userIn.(*jwtutil.JwtPayload)
 	if !ok {
-		return jwtutil.JwtPayload{}, fmt.Errorf("AuthenticatedUser is only available for protected routes")
+		return nil, fmt.Errorf("AuthenticatedUser is only available for protected routes")
 	}
 	return payload, nil
 }

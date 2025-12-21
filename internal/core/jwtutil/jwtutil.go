@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/aritradeveops/porichoy/internal/pkg/resolver"
+	"github.com/aritradeveops/porichoy/pkg/resolver"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 )

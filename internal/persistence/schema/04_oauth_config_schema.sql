@@ -6,6 +6,8 @@ CREATE TABLE "oauth_configs" (
   error_callback_url TEXT NOT NULL, 
   jwt_algo varchar(10) NOT NULL,
   jwt_secret_resolver TEXT,
+  jwt_lifetime varchar(10) NOT NULL,
+  refresh_token_lifetime varchar(10) NOT NULL,
   app_id uuid NOT NUll,
   created_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
   created_by uuid NOT NULL,

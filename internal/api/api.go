@@ -11,9 +11,9 @@ import (
 	"github.com/aritradeveops/porichoy/internal/core/service"
 	"github.com/aritradeveops/porichoy/internal/persistence/db"
 	"github.com/aritradeveops/porichoy/internal/persistence/repository"
-	"github.com/aritradeveops/porichoy/internal/pkg/resolver"
 	"github.com/aritradeveops/porichoy/internal/ports/httpd"
 	"github.com/aritradeveops/porichoy/internal/ports/httpd/handlers"
+	"github.com/aritradeveops/porichoy/pkg/resolver"
 )
 
 func Run() error {

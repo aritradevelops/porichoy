@@ -10,4 +10,8 @@ authentication:
     signing_key_resolver: env://JWT_SECRET
     verifying_key_resolver: env://JWT_SECRET
     lifetime: 1d
-  refresh_token_lifetime: 1d
+  refresh_token:
+    lifetime: 1d
+  oauth:
+    lifetime: 1d
+

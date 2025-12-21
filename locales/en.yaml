@@ -14,6 +14,7 @@ controller:
   update: "{{.Entity}} updated successfully."
   view: "{{.Entity}} fetched successfully."
   delete: "{{.Entity}} deleted successfully."
+# validation messages
 validation:
   required: "The {{.Field}} is required."
   min: "The {{.Field}} must be of length {{.Param}} or more."
@@ -25,3 +26,8 @@ validation:
   special: "The {{.Field}} must contain at least {{.Param}} special character."
 user:
   register: "User registered successfully."
+  login: "User logged in successfully."
+  exists: "User already exists."
+  deactivated: "User account deactivated."
+  invalid_credentials: "Invalid email or password."
+  invalid_method: "Invalid login method."

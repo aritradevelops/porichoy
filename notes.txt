@@ -1,0 +1,9 @@
+google example oauth call
+
+https://accounts.google.com/o/oauth2/v2/auth?redirect_uri=https://api-hush.swiftgeek.in/v1/oauth/callback/google&client_id=551164409369-q09nlbcg8i6bu5tcnrshsgaagvj6qgqc.apps.googleusercontent.com&access_type=offline&response_type=code&prompt=consent&scope=https://www.googleapis.com/auth/userinfo.profile https://www.googleapis.com/auth/userinfo.email
+
+flow => 
+1. goes to account chooser
+2. user selects account
+3. promts user for his consent to sign in to the application
+4. 
