@@ -29,12 +29,12 @@ func (q *Queries) CreatePasswordForUser(ctx context.Context, arg CreatePasswordF
 	return err
 }
 
-const getUserPassword = `-- name: GetUserPassword :one
+const findUserPassword = `-- name: FindUserPassword :one
 SELECT id, hashed_password, created_at, created_by, updated_at, updated_by, deleted_at, deleted_by FROM "passwords" WHERE created_by = $1 AND deleted_at IS NULL
 `
 
-func (q *Queries) GetUserPassword(ctx context.Context, createdBy uuid.UUID) (Password, error) {
-	row := q.db.QueryRow(ctx, getUserPassword, createdBy)
+func (q *Queries) FindUserPassword(ctx context.Context, createdBy uuid.UUID) (Password, error) {
+	row := q.db.QueryRow(ctx, findUserPassword, createdBy)
 	var i Password
 	err := row.Scan(
 		&i.ID,

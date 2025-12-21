@@ -15,11 +15,13 @@ type Querier interface {
 	CreateOauthCall(ctx context.Context, arg CreateOauthCallParams) error
 	CreateOauthInfo(ctx context.Context, arg CreateOauthInfoParams) error
 	CreatePasswordForUser(ctx context.Context, arg CreatePasswordForUserParams) error
+	CreateSession(ctx context.Context, arg CreateSessionParams) error
 	FindAppByClientID(ctx context.Context, clientID string) (FindAppByClientIDRow, error)
 	FindOauthCallByCode(ctx context.Context, code string) (OauthCall, error)
+	FindSessionByRefreshTokenAndAppID(ctx context.Context, arg FindSessionByRefreshTokenAndAppIDParams) (Session, error)
 	FindUserByEmail(ctx context.Context, email string) (User, error)
 	FindUserByID(ctx context.Context, id uuid.UUID) (User, error)
-	GetUserPassword(ctx context.Context, createdBy uuid.UUID) (Password, error)
+	FindUserPassword(ctx context.Context, createdBy uuid.UUID) (Password, error)
 	RegisterUser(ctx context.Context, arg RegisterUserParams) (User, error)
 }
 

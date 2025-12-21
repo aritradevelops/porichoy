@@ -1,0 +1,21 @@
+CREATE TABLE "session" (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  user_id uuid NOT NULL,
+  app_id uuid NOT NULL,
+  refresh_token text NOT NULL UNIQUE,
+  user_ip varchar(45) NOT NULL,
+  user_agent text NOT NULL,
+  expires_at timestamptz NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  created_by uuid NOT NULL,
+  updated_at timestamptz,
+  updated_by uuid,
+  deleted_at timestamptz,
+  deleted_by uuid,
+  PRIMARY KEY("id"),
+  FOREIGN KEY("created_by") REFERENCES "users"("id"),
+  FOREIGN KEY("updated_by") REFERENCES "users"("id"), 
+  FOREIGN KEY("deleted_by") REFERENCES "users"("id"),
+  FOREIGN KEY("user_id") REFERENCES "users"("id"),
+  FOREIGN KEY("app_id") REFERENCES "apps"("id")
+)

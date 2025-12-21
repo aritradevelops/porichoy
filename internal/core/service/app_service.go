@@ -56,14 +56,16 @@ func (s *Service) CreateApp(ctx context.Context, initiator string, payload Creat
 	fmt.Println(clientSecret)
 
 	err = s.repository.CreateOauthInfo(ctx, repository.CreateOauthInfoParams{
-		ClientSecret:       clientSecret,
-		RedirectUris:       payload.RedirectUris,
-		SuccessCallbackUrl: payload.SuccessCallbackUrl,
-		ErrorCallbackUrl:   payload.ErrorCallbackUrl,
-		JwtAlgo:            payload.JwtAlgo,
-		JwtSecretResolver:  pgtype.Text{String: payload.JwtSecretResolver, Valid: true},
-		AppID:              app.ID,
-		CreatedBy:          uuid.MustParse(initiator),
+		ClientSecret:         clientSecret,
+		RedirectUris:         payload.RedirectUris,
+		SuccessCallbackUrl:   payload.SuccessCallbackUrl,
+		ErrorCallbackUrl:     payload.ErrorCallbackUrl,
+		JwtAlgo:              payload.JwtAlgo,
+		JwtSecretResolver:    pgtype.Text{String: payload.JwtSecretResolver, Valid: true},
+		JwtLifetime:          payload.JwtLifetime,
+		RefreshTokenLifetime: payload.RefreshTokenLifetime,
+		AppID:                app.ID,
+		CreatedBy:            uuid.MustParse(initiator),
 	})
 
 	return app, err

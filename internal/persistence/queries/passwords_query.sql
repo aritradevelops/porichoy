@@ -5,5 +5,5 @@ INSERT INTO "passwords" (
   $1, $2
 );
 
--- name: GetUserPassword :one
+-- name: FindUserPassword :one
 SELECT * FROM "passwords" WHERE created_by = $1 AND deleted_at IS NULL;

@@ -31,8 +31,10 @@ type RegisterUserPayload struct {
 }
 
 type LoginUserPayload struct {
-	Email    string `json:"email,omitempty" validate:"required,email"`
-	Password string `json:"password,omitempty" validate:"required"`
+	Email     string `json:"email,omitempty" validate:"required,email"`
+	Password  string `json:"password,omitempty" validate:"required"`
+	UserAgent string `json:"user_agent,omitempty" validate:"required"`
+	UserIP    string `json:"user_ip,omitempty" validate:"required"`
 }
 
 type Oauth2Payload struct {
@@ -53,6 +55,8 @@ type Oauth2TokenPayload struct {
 	GrantType    string `json:"grant_type" validate:"required,oneof=authorization_code client_credentials"`
 	Code         string `json:"code" validate:"required"`
 	RedirectURI  string `json:"redirect_uri" validate:"required"`
+	UserAgent    string `json:"user_agent" validate:"required"`
+	UserIP       string `json:"user_ip" validate:"required"`
 }
 
 type Oauth2TokenResponse struct {
@@ -151,7 +155,7 @@ func (s *Service) LoginUser(ctx context.Context, payload LoginUserPayload) (Auth
 		return tokens, ErrDeactivatedUser
 	}
 
-	passwd, err := s.repository.GetUserPassword(ctx, user.ID)
+	passwd, err := s.repository.FindUserPassword(ctx, user.ID)
 	if err != nil {
 		// if err is does not exist then throw invalid login method
 		logger.Error().Err(err).Msg("")
@@ -183,6 +187,20 @@ func (s *Service) LoginUser(ctx context.Context, payload LoginUserPayload) (Auth
 	}
 
 	refreshToken, err := cryptoutil.GenerateHash(32)
+	if err != nil {
+		return tokens, err
+	}
+
+	// create session
+	err = s.repository.CreateSession(ctx, repository.CreateSessionParams{
+		UserID:       user.ID,
+		AppID:        uuid.Nil,
+		RefreshToken: refreshToken,
+		UserIp:       "localhost",
+		UserAgent:    "localhost",
+		ExpiresAt:    time.Now().Add(s.config.Authentication.RefreshToken.Lifetime.Duration()),
+		CreatedBy:    user.ID,
+	})
 	if err != nil {
 		return tokens, err
 	}
@@ -284,10 +302,28 @@ func (s *Service) Token(ctx context.Context, payload Oauth2TokenPayload) (Oauth2
 			Email:  user.Email,
 			Dp:     user.Dp.String,
 		}, app.OauthConfig.JwtSecretResolver.String, app.App.Domain, s.config.Http.Host, timex.Duration(app.OauthConfig.JwtLifetime).Duration())
+
+		if err != nil {
+			return resp, err
+		}
+
 		resp.AccessToken = accessToken
 		resp.AccessTokenLifetime = time.Now().Add(timex.Duration(app.OauthConfig.JwtLifetime).Duration())
 
 		refreshToken, err := cryptoutil.GenerateHash(64)
+		if err != nil {
+			return resp, err
+		}
+
+		err = s.repository.CreateSession(ctx, repository.CreateSessionParams{
+			UserID:       user.ID,
+			AppID:        app.App.ID,
+			RefreshToken: refreshToken,
+			UserIp:       payload.UserIP,
+			UserAgent:    payload.UserAgent,
+			ExpiresAt:    time.Now().Add(s.config.Authentication.RefreshToken.Lifetime.Duration()),
+			CreatedBy:    user.ID,
+		})
 		if err != nil {
 			return resp, err
 		}

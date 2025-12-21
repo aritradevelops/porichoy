@@ -62,7 +62,12 @@ func (h *Handlers) LoginUser(c *fiber.Ctx) error {
 	if err != nil {
 		return err
 	}
-	tokens, err := h.service.LoginUser(c.Context(), service.LoginUserPayload(payload))
+	tokens, err := h.service.LoginUser(c.Context(), service.LoginUserPayload{
+		Email:     payload.Email,
+		Password:  payload.Password,
+		UserAgent: c.Get("User-Agent"),
+		UserIP:    c.IP(),
+	})
 	if err != nil {
 		if errors.Is(err, service.ErrInvalidLoginCredentials) {
 			c.Status(fiber.StatusBadRequest)
@@ -123,7 +128,15 @@ func (h *Handlers) Token(c *fiber.Ctx) error {
 	if err != nil {
 		return err
 	}
-	tokens, err := h.service.Token(c.Context(), service.Oauth2TokenPayload(payload))
+	tokens, err := h.service.Token(c.Context(), service.Oauth2TokenPayload{
+		ClientID:     payload.ClientID,
+		ClientSecret: payload.ClientSecret,
+		GrantType:    payload.GrantType,
+		Code:         payload.Code,
+		RedirectURI:  payload.RedirectURI,
+		UserAgent:    c.Get("User-Agent"),
+		UserIP:       c.IP(),
+	})
 	if err != nil {
 		return err
 	}

@@ -66,6 +66,22 @@ type Password struct {
 	DeletedBy      *uuid.UUID `json:"deleted_by"`
 }
 
+type Session struct {
+	ID           uuid.UUID  `json:"id"`
+	UserID       uuid.UUID  `json:"user_id"`
+	AppID        uuid.UUID  `json:"app_id"`
+	RefreshToken string     `json:"refresh_token"`
+	UserIp       string     `json:"user_ip"`
+	UserAgent    string     `json:"user_agent"`
+	ExpiresAt    time.Time  `json:"expires_at"`
+	CreatedAt    time.Time  `json:"created_at"`
+	CreatedBy    uuid.UUID  `json:"created_by"`
+	UpdatedAt    *time.Time `json:"updated_at"`
+	UpdatedBy    *uuid.UUID `json:"updated_by"`
+	DeletedAt    *time.Time `json:"deleted_at"`
+	DeletedBy    *uuid.UUID `json:"deleted_by"`
+}
+
 type User struct {
 	ID            uuid.UUID   `json:"id"`
 	Email         string      `json:"email"`
