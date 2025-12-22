@@ -22,5 +22,6 @@ func (s *Server) setupRoutes() {
 	authRouter.Get("/oauth2", authn.Middleware(s.config.Authentication.JWT, true), s.handlers.Oauth2)
 	appRouter := apiRouter.Group("/apps", authn.Middleware(s.config.Authentication.JWT))
 	appRouter.Post("/create", s.handlers.CreateApp)
-
+	configRouter := apiRouter.Group("/config")
+	configRouter.Post("/configure", s.handlers.Configure)
 }

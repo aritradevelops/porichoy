@@ -46,7 +46,7 @@ func (h *Handlers) RegisterUser(c *fiber.Ctx) error {
 	if err != nil {
 		return err
 	}
-	user, err := h.service.RegisterUser(c.Context(), service.RegisterUserPayload(payload))
+	user, err := h.service.RegisterUser(c.Context(), service.RegisterUserPayload(payload), false)
 	if err != nil {
 		if errors.Is(err, service.ErrUserExists) {
 			return c.JSON(NewErrorResponse(translation.Localize(c, "user.exists"), err))

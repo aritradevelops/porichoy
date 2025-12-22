@@ -70,3 +70,8 @@ func (s *Service) CreateApp(ctx context.Context, initiator string, payload Creat
 
 	return app, err
 }
+
+// Root App has the same host of the server
+func (s *Service) FindRootApp(ctx context.Context, host string) (repository.FindAppByClientIDRow, error) {
+	return s.repository.FindAppByClientID(ctx, host)
+}

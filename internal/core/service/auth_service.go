@@ -93,7 +93,7 @@ var (
 
 // Errors:
 //   - ErrUserExists
-func (s *Service) RegisterUser(ctx context.Context, payload RegisterUserPayload) (repository.User, error) {
+func (s *Service) RegisterUser(ctx context.Context, payload RegisterUserPayload, isRootUser bool) (repository.User, error) {
 	var user repository.User
 	// validate payload
 	errs := validation.Validate(payload)
@@ -110,8 +110,13 @@ func (s *Service) RegisterUser(ctx context.Context, payload RegisterUserPayload)
 	if err == nil {
 		return user, ErrUserExists
 	}
+	var userId uuid.UUID
 	// create new user
-	userId := uuid.New()
+	if !isRootUser {
+		userId = uuid.New()
+	} else {
+		userId = uuid.Nil
+	}
 	user, err = s.repository.RegisterUser(ctx, repository.RegisterUserParams{
 		ID:        userId,
 		Email:     payload.Email,
@@ -145,6 +150,11 @@ func (s *Service) LoginUser(ctx context.Context, payload LoginUserPayload) (Auth
 	if errs != nil {
 		return tokens, errs
 	}
+	rootApp, err := s.FindRootApp(ctx, s.config.Http.Host)
+	if err != nil {
+		return tokens, err
+	}
+
 	user, err := s.repository.FindUserByEmail(ctx, payload.Email)
 	if err != nil {
 		logger.Error().Err(err).Msg("")
@@ -174,13 +184,13 @@ func (s *Service) LoginUser(ctx context.Context, payload LoginUserPayload) (Auth
 	if user.Dp.Valid {
 		dp = user.Dp.String
 	}
-	jwtConfig := s.config.Authentication.JWT
-	accessToken, err := jwtutil.Sign(jwtConfig.Algorithm, jwtutil.JwtPayload{
+	accessToken, err := jwtutil.Sign(rootApp.OauthConfig.JwtAlgo, jwtutil.JwtPayload{
 		UserID: user.ID.String(),
 		Name:   user.Name,
 		Email:  user.Email,
 		Dp:     dp,
-	}, jwtConfig.SigningKeyResolver, "localhost", "localhost", jwtConfig.Lifetime.Duration())
+	}, rootApp.OauthConfig.JwtSecretResolver.String, rootApp.App.Domain, rootApp.App.Domain,
+		timex.Duration(rootApp.OauthConfig.JwtLifetime).Duration())
 
 	if err != nil {
 		return tokens, err
