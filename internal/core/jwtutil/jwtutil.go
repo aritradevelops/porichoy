@@ -10,10 +10,11 @@ import (
 )
 
 type JwtPayload struct {
-	UserID string `json:"user_id,omitempty"`
-	Name   string `json:"name,omitempty"`
-	Email  string `json:"email,omitempty"`
-	Dp     string `json:"dp,omitempty"`
+	UserID   string `json:"user_id,omitempty"`
+	Name     string `json:"name,omitempty"`
+	Email    string `json:"email,omitempty"`
+	Dp       string `json:"dp,omitempty"`
+	Resolver string `json:"resolver,omitempty"`
 }
 
 type Claims struct {
@@ -24,6 +25,7 @@ type Claims struct {
 func Sign(alg string, payload JwtPayload, secretResolver string, aud string, iss string, lifetime time.Duration) (string, error) {
 	method := jwt.GetSigningMethod(alg)
 	factory := resolver.NewResolverFactory()
+	payload.Resolver = secretResolver
 	r, err := factory.Auto(secretResolver)
 	if err != nil {
 		return "", fmt.Errorf("jwtutil: could not resolver secret: %v", err)
@@ -67,49 +69,38 @@ func Sign(alg string, payload JwtPayload, secretResolver string, aud string, iss
 	}
 }
 
-func Verify(alg string, token string, secretResolver string) (*JwtPayload, error) {
-	method := jwt.GetSigningMethod(alg)
+func Verify(token string) (*JwtPayload, error) {
 	factory := resolver.NewResolverFactory()
-	r, err := factory.Auto(secretResolver)
-	if err != nil {
-		return nil, fmt.Errorf("jwtutil: could not resolve secret: %v", err)
-	}
-	secret, err := r.Resolve(secretResolver)
-	if err != nil {
-		return nil, fmt.Errorf("jwtutil: could not resolve secret: %v", err)
-	}
-	secretStr := secret.(string)
 
 	claims := &Claims{}
-	switch method.(type) {
-	case *jwt.SigningMethodHMAC:
-		parsed, err := jwt.ParseWithClaims(token, claims, func(t *jwt.Token) (any, error) {
-			return []byte(secretStr), nil
-		})
-		if err != nil {
-			return nil, err
-		}
-		if !parsed.Valid {
-			return nil, fmt.Errorf("jwtutil: invalid token")
-		}
-		return &claims.JwtPayload, nil
-	case *jwt.SigningMethodRSA:
-		key, err := jwt.ParseRSAPublicKeyFromPEM([]byte(secretStr))
-		if err != nil {
-			return nil, err
-		}
-		parsed, err := jwt.ParseWithClaims(token, claims, func(t *jwt.Token) (any, error) {
-			return key, nil
-		})
-		if err != nil {
-			return nil, err
-		}
-		if !parsed.Valid {
-			return nil, fmt.Errorf("jwtutil: invalid token")
-		}
-		return &claims.JwtPayload, err
 
-	default:
-		return &claims.JwtPayload, fmt.Errorf("jwtutil: %s is not implemented", method.Alg())
+	parsed, err := jwt.ParseWithClaims(token, claims, func(t *jwt.Token) (any, error) {
+		r, err := factory.Auto(claims.Resolver)
+		if err != nil {
+			return nil, fmt.Errorf("jwtutil: could not resolve secret: %v", err)
+		}
+		secret, err := r.Resolve(claims.Resolver)
+		if err != nil {
+			return nil, fmt.Errorf("jwtutil: could not resolve secret: %v", err)
+		}
+		switch t.Method.(type) {
+		case *jwt.SigningMethodHMAC:
+			return []byte(secret.(string)), nil
+		case *jwt.SigningMethodRSA:
+			key, err := jwt.ParseRSAPublicKeyFromPEM([]byte(secret.(string)))
+			if err != nil {
+				return nil, err
+			}
+			return key, nil
+		default:
+			return nil, fmt.Errorf("jwtutil: %s is not implemented", t.Method.Alg())
+		}
+	})
+	if err != nil {
+		return nil, err
 	}
+	if !parsed.Valid {
+		return nil, fmt.Errorf("jwtutil: invalid token")
+	}
+	return &claims.JwtPayload, nil
 }

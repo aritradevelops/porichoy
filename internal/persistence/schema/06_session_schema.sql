@@ -1,4 +1,4 @@
-CREATE TABLE "session" (
+CREATE TABLE "sessions" (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
   user_id uuid NOT NULL,
   app_id uuid NOT NULL,

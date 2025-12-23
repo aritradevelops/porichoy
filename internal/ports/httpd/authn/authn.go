@@ -4,14 +4,13 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/aritradeveops/porichoy/internal/config"
 	"github.com/aritradeveops/porichoy/internal/core/jwtutil"
 	"github.com/gofiber/fiber/v2"
 )
 
 const authUserKey = "auth_user"
 
-func Middleware(conf config.JWT, redirect ...bool) fiber.Handler {
+func Middleware(redirect ...bool) fiber.Handler {
 	return func(c *fiber.Ctx) error {
 		bearer := c.Get("Authorization")
 		if bearer == "" {
@@ -25,7 +24,7 @@ func Middleware(conf config.JWT, redirect ...bool) fiber.Handler {
 			return fiber.ErrUnauthorized
 		}
 		accessToken := strings.TrimPrefix(bearer, "Bearer ")
-		payload, err := jwtutil.Verify(conf.Algorithm, accessToken, conf.VerifyingKeyResolver)
+		payload, err := jwtutil.Verify(accessToken)
 		if err != nil {
 			if len(redirect) > 0 && redirect[0] {
 				return c.Redirect("/login?next=" + string(c.Request().URI().QueryString()))

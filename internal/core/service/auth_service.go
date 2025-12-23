@@ -35,6 +35,7 @@ type LoginUserPayload struct {
 	Password  string `json:"password,omitempty" validate:"required"`
 	UserAgent string `json:"user_agent,omitempty" validate:"required"`
 	UserIP    string `json:"user_ip,omitempty" validate:"required"`
+	Host      string `json:"host,omitempty" validate:"required"`
 }
 
 type Oauth2Payload struct {
@@ -80,6 +81,10 @@ type Oauth2Response struct {
 	App         repository.App         `json:"app"`
 	OauthConfig repository.OauthConfig `json:"oauth_config"`
 }
+
+const (
+	OauthCodeLifetime = 10 * time.Minute
+)
 
 var (
 	ErrInvalidLoginCredentials = errors.New("auth_service: invalid email or password")
@@ -150,14 +155,15 @@ func (s *Service) LoginUser(ctx context.Context, payload LoginUserPayload) (Auth
 	if errs != nil {
 		return tokens, errs
 	}
-	rootApp, err := s.FindRootApp(ctx, s.config.Http.Host)
+	rootApp, err := s.repository.FindRootApp(ctx)
 	if err != nil {
+		logger.Error().Err(err).Msg("zero")
 		return tokens, err
 	}
 
 	user, err := s.repository.FindUserByEmail(ctx, payload.Email)
 	if err != nil {
-		logger.Error().Err(err).Msg("")
+		logger.Error().Err(err).Msg("one")
 		return tokens, ErrInvalidLoginCredentials
 	}
 
@@ -168,14 +174,14 @@ func (s *Service) LoginUser(ctx context.Context, payload LoginUserPayload) (Auth
 	passwd, err := s.repository.FindUserPassword(ctx, user.ID)
 	if err != nil {
 		// if err is does not exist then throw invalid login method
-		logger.Error().Err(err).Msg("")
+		logger.Error().Err(err).Msg("two")
 		return tokens, ErrInvalidLoginMethod
 	}
 
 	// compare passwords
 	err = bcrypt.CompareHashAndPassword([]byte(passwd.HashedPassword), []byte(payload.Password))
 	if err != nil {
-		logger.Error().Err(err).Msg("")
+		logger.Error().Err(err).Msg("three")
 		return tokens, ErrInvalidLoginCredentials
 	}
 
@@ -193,6 +199,7 @@ func (s *Service) LoginUser(ctx context.Context, payload LoginUserPayload) (Auth
 		timex.Duration(rootApp.OauthConfig.JwtLifetime).Duration())
 
 	if err != nil {
+		logger.Error().Err(err).Msg("four")
 		return tokens, err
 	}
 
@@ -204,11 +211,11 @@ func (s *Service) LoginUser(ctx context.Context, payload LoginUserPayload) (Auth
 	// create session
 	err = s.repository.CreateSession(ctx, repository.CreateSessionParams{
 		UserID:       user.ID,
-		AppID:        uuid.Nil,
+		AppID:        rootApp.App.ID,
 		RefreshToken: refreshToken,
-		UserIp:       "localhost",
-		UserAgent:    "localhost",
-		ExpiresAt:    time.Now().Add(s.config.Authentication.RefreshToken.Lifetime.Duration()),
+		UserIp:       payload.UserIP,
+		UserAgent:    payload.UserAgent,
+		ExpiresAt:    time.Now().Add(timex.Duration(rootApp.OauthConfig.RefreshTokenLifetime).Duration()),
 		CreatedBy:    user.ID,
 	})
 	if err != nil {
@@ -217,8 +224,8 @@ func (s *Service) LoginUser(ctx context.Context, payload LoginUserPayload) (Auth
 
 	tokens.AccessToken = accessToken
 	tokens.RefreshToken = refreshToken
-	tokens.AccessTokenExpiry = time.Now().Add(s.config.Authentication.JWT.Lifetime.Duration())
-	tokens.RefreshTokenExpiry = time.Now().Add(s.config.Authentication.RefreshToken.Lifetime.Duration())
+	tokens.AccessTokenExpiry = time.Now().Add(timex.Duration(rootApp.OauthConfig.JwtLifetime).Duration())
+	tokens.RefreshTokenExpiry = time.Now().Add(timex.Duration(rootApp.OauthConfig.RefreshTokenLifetime).Duration())
 	return tokens, nil
 }
 
@@ -257,7 +264,7 @@ func (s *Service) Oauth2(ctx context.Context, initiator string, payload Oauth2Pa
 			AppID:     app.App.ID,
 			Code:      code,
 			UserID:    uuid.MustParse(initiator),
-			ExpiresAt: time.Now().Add(s.config.Authentication.Oauth.Lifetime.Duration()),
+			ExpiresAt: time.Now().Add(OauthCodeLifetime),
 		})
 		if err != nil {
 			logger.Error().Err(err).Msg("five")
@@ -331,7 +338,7 @@ func (s *Service) Token(ctx context.Context, payload Oauth2TokenPayload) (Oauth2
 			RefreshToken: refreshToken,
 			UserIp:       payload.UserIP,
 			UserAgent:    payload.UserAgent,
-			ExpiresAt:    time.Now().Add(s.config.Authentication.RefreshToken.Lifetime.Duration()),
+			ExpiresAt:    time.Now().Add(timex.Duration(app.OauthConfig.RefreshTokenLifetime).Duration()),
 			CreatedBy:    user.ID,
 		})
 		if err != nil {

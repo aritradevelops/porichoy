@@ -13,6 +13,7 @@ import (
 	"github.com/aritradeveops/porichoy/internal/persistence/repository"
 	"github.com/aritradeveops/porichoy/internal/ports/httpd"
 	"github.com/aritradeveops/porichoy/internal/ports/httpd/handlers"
+	"github.com/aritradeveops/porichoy/internal/ports/httpd/ui"
 	"github.com/aritradeveops/porichoy/pkg/resolver"
 )
 
@@ -40,7 +41,8 @@ func Run() error {
 	repo := repository.New(dbtx)
 	srv := service.New(config, repo)
 	handlers := handlers.New(srv)
-	httpServer := httpd.NewServer(config, handlers)
+	ui := ui.New(config.UI.Template)
+	httpServer := httpd.NewServer(config, handlers, ui)
 
 	go func() {
 		err := httpServer.Start()

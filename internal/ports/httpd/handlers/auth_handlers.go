@@ -67,6 +67,7 @@ func (h *Handlers) LoginUser(c *fiber.Ctx) error {
 		Password:  payload.Password,
 		UserAgent: c.Get("User-Agent"),
 		UserIP:    c.IP(),
+		Host:      c.Hostname(),
 	})
 	if err != nil {
 		if errors.Is(err, service.ErrInvalidLoginCredentials) {

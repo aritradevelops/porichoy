@@ -7,6 +7,7 @@ import (
 	"github.com/aritradeveops/porichoy/internal/pkg/translation"
 	"github.com/aritradeveops/porichoy/internal/ports/httpd/handlers"
 	"github.com/aritradeveops/porichoy/internal/ports/httpd/middlewares"
+	"github.com/aritradeveops/porichoy/internal/ports/httpd/ui"
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/recover"
 )
@@ -15,9 +16,10 @@ type Server struct {
 	app      *fiber.App
 	config   *config.Config
 	handlers *handlers.Handlers
+	ui       *ui.UI
 }
 
-func NewServer(config *config.Config, handlers *handlers.Handlers) *Server {
+func NewServer(config *config.Config, handlers *handlers.Handlers, ui *ui.UI) *Server {
 	app := fiber.New(fiber.Config{
 		ErrorHandler: middlewares.ErrorHandler(),
 	})
@@ -30,6 +32,7 @@ func NewServer(config *config.Config, handlers *handlers.Handlers) *Server {
 		config:   config,
 		app:      app,
 		handlers: handlers,
+		ui:       ui,
 	}
 	server.setupRoutes()
 	return server

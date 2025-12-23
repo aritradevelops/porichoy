@@ -4,14 +4,5 @@ http:
   port: 8080
 database:
   uri_resolver: env://DATABASE_CONNECTION
-authentication:
-  jwt:
-    algorithm: HS256
-    signing_key_resolver: env://JWT_SECRET
-    verifying_key_resolver: env://JWT_SECRET
-    lifetime: 1d
-  refresh_token:
-    lifetime: 1d
-  oauth:
-    lifetime: 1d
-
+ui:
+  template: vanilla
