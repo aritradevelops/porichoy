@@ -2,15 +2,26 @@ package main
 
 import (
 	"embed"
-	"io"
+	"encoding/json"
+	"fmt"
 	"io/fs"
 	"log"
 	"net/http"
 	"net/url"
+
+	"github.com/aritradeveops/porichoy/internal/core/jwtutil"
 )
 
 //go:embed public/*
 var publicFS embed.FS
+
+type TokenResponse struct {
+	Message string `json:"message"`
+	Data    struct {
+		AccessToken  string `json:"access_token"`
+		RefreshToken string `json:"refresh_token"`
+	} `json:"data"`
+}
 
 func main() {
 	subFS, err := fs.Sub(publicFS, "public")
@@ -36,7 +47,7 @@ func main() {
 
 		resp, err := http.Post("http://localhost:8080/api/v1/auth/token?"+query.Encode(), "application/x-www-form-urlencoded", nil)
 
-		if err != nil {
+		if err != nil || resp.StatusCode != http.StatusOK {
 			w.WriteHeader(http.StatusInternalServerError)
 			w.Write([]byte("Internal Server Error"))
 			w.Header().Set("Location", "/authorize/error")
@@ -44,17 +55,34 @@ func main() {
 		}
 		defer resp.Body.Close()
 
-		body, err := io.ReadAll(resp.Body)
-		if err != nil {
+		var tokenResponse TokenResponse
+		if err := json.NewDecoder(resp.Body).Decode(&tokenResponse); err != nil {
 			w.WriteHeader(http.StatusPermanentRedirect)
 			w.Header().Set("Location", "/authorize/error")
 			return
 		}
-
-		w.Header().Set("Set-Cookie", "access_token="+string(body))
-		w.Header().Set("Location", "/")
+		w.Header().Set("Set-Cookie", "access_token="+tokenResponse.Data.AccessToken)
+		w.Header().Set("Location", "/profile")
 		w.WriteHeader(http.StatusPermanentRedirect)
 	})
+
+	http.HandleFunc("/profile", func(w http.ResponseWriter, r *http.Request) {
+		c, err := r.Cookie("access_token")
+		if err != nil {
+			w.WriteHeader(http.StatusUnauthorized)
+			w.Write([]byte("Unauthorized"))
+			return
+		}
+		userData, err := jwtutil.Verify(c.Value)
+		if err != nil {
+			w.WriteHeader(http.StatusUnauthorized)
+			w.Write([]byte("Unauthorized"))
+			return
+		}
+
+		w.Write(fmt.Appendf(nil, "Hello %s! You are logged in.", userData.Email))
+	})
+
 	err = http.ListenAndServe(":5000", nil)
 	if err != nil {
 		log.Fatal(err)

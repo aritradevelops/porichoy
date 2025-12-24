@@ -2,6 +2,7 @@ package authn
 
 import (
 	"fmt"
+	"net/url"
 	"strings"
 
 	"github.com/aritradeveops/porichoy/internal/core/jwtutil"
@@ -19,7 +20,7 @@ func Middleware(redirect ...bool) fiber.Handler {
 		if bearer == "" {
 
 			if len(redirect) > 0 && redirect[0] {
-				return c.Redirect("/login?next=" + string(c.Request().URI().QueryString()))
+				return c.Redirect("/login?next=" + url.QueryEscape(c.OriginalURL()))
 			}
 			return fiber.ErrUnauthorized
 		}
@@ -27,7 +28,7 @@ func Middleware(redirect ...bool) fiber.Handler {
 		payload, err := jwtutil.Verify(accessToken)
 		if err != nil {
 			if len(redirect) > 0 && redirect[0] {
-				return c.Redirect("/login?next=" + string(c.Request().URI().QueryString()))
+				return c.Redirect("/login?next=" + url.QueryEscape(c.OriginalURL()))
 			}
 			return fiber.ErrUnauthorized
 		}

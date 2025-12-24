@@ -41,7 +41,7 @@ func Run() error {
 	repo := repository.New(dbtx)
 	srv := service.New(config, repo)
 	handlers := handlers.New(srv)
-	ui := ui.New(config.UI.Template)
+	ui := ui.New(config.UI.Template, srv)
 	httpServer := httpd.NewServer(config, handlers, ui)
 
 	go func() {

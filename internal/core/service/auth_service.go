@@ -60,6 +60,14 @@ type Oauth2TokenPayload struct {
 	UserIP       string `json:"user_ip" validate:"required"`
 }
 
+type Oauth2ConsentPayload struct {
+	ClientID string `json:"client_id" validate:"required"`
+}
+
+type Oauth2ConsentResponse struct {
+	AppName string `json:"app_name"`
+}
+
 type Oauth2TokenResponse struct {
 	AccessToken          string    `json:"access_token"`
 	AccessTokenLifetime  time.Time `json:"access_token_lifetime"`
@@ -282,6 +290,20 @@ func (s *Service) Oauth2(ctx context.Context, initiator string, payload Oauth2Pa
 	return resp, nil
 }
 
+func (s *Service) Oauth2ConsentResponse(ctx context.Context, payload Oauth2ConsentPayload) (Oauth2ConsentResponse, error) {
+	errs := validation.Validate(payload)
+	var resp Oauth2ConsentResponse
+	if errs != nil {
+		return resp, errs
+	}
+	app, err := s.repository.FindAppByClientID(ctx, payload.ClientID)
+	if err != nil {
+		return resp, err
+	}
+	resp.AppName = app.App.Name
+	return resp, nil
+}
+
 func (s *Service) Token(ctx context.Context, payload Oauth2TokenPayload) (Oauth2TokenResponse, error) {
 	var resp Oauth2TokenResponse
 
@@ -313,6 +335,7 @@ func (s *Service) Token(ctx context.Context, payload Oauth2TokenPayload) (Oauth2
 		if err != nil {
 			return resp, err
 		}
+		logger.Info().Any("user", app).Msg("app")
 		accessToken, err := jwtutil.Sign(app.OauthConfig.JwtAlgo, jwtutil.JwtPayload{
 			UserID: user.ID.String(),
 			Name:   user.Name,

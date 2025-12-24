@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Authorize application</title>
+
+    <style>
+        * {
+            box-sizing: border-box;
+            font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        }
+
+        body {
+            background: #f5f7fb;
+            margin: 0;
+            padding: 40px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+        }
+
+        .container {
+            background: #ffffff;
+            max-width: 420px;
+            width: 100%;
+            padding: 32px;
+            border-radius: 12px;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.08);
+        }
+
+        h1 {
+            margin-top: 0;
+            margin-bottom: 8px;
+            text-align: center;
+            font-size: 1.6rem;
+        }
+
+        .subtitle {
+            text-align: center;
+            font-size: 0.9rem;
+            color: #666;
+            margin-bottom: 24px;
+        }
+
+        .app {
+            text-align: center;
+            margin-bottom: 24px;
+        }
+
+        .app-name {
+            font-weight: 600;
+            font-size: 1rem;
+            color: #111;
+        }
+
+        .scopes {
+            margin-bottom: 24px;
+        }
+
+        .scopes h3 {
+            font-size: 0.85rem;
+            color: #444;
+            margin-bottom: 10px;
+        }
+
+        .scope {
+            background: #f8fafc;
+            border: 1px solid #e5e7eb;
+            border-radius: 8px;
+            padding: 10px 12px;
+            font-size: 0.9rem;
+            margin-bottom: 8px;
+            color: #333;
+        }
+
+        .actions {
+            display: flex;
+            gap: 12px;
+        }
+
+        button {
+            flex: 1;
+            padding: 12px;
+            border: none;
+            border-radius: 10px;
+            font-size: 0.95rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 0.2s ease, transform 0.1s ease;
+        }
+
+        .approve {
+            background: #6366f1;
+            color: white;
+        }
+
+        .approve:hover {
+            background: #4f46e5;
+        }
+
+        .deny {
+            background: #e5e7eb;
+            color: #111;
+        }
+
+        .deny:hover {
+            background: #d1d5db;
+        }
+
+        button:active {
+            transform: scale(0.98);
+        }
+
+        .footer {
+            margin-top: 20px;
+            text-align: center;
+            font-size: 0.8rem;
+            color: #666;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <h1>Authorize access</h1>
+        <div class="subtitle">An application is requesting access to your account</div>
+
+        <div class="app">
+            <div class="app-name" id="clientName">{{.AppName}}</div>
+        </div>
+
+        <div class="scopes">
+            <h3>This app will be able to:</h3>
+            <div class="scope">Read your basic profile</div>
+            <div class="scope">Access your email address</div>
+        </div>
+
+        <div class="actions">
+            <button class="deny" onclick="deny()">Cancel</button>
+            <button class="approve" onclick="approve()">Allow</button>
+        </div>
+
+        <div class="footer">
+            You can revoke access at any time from your account settings
+        </div>
+    </div>
+
+    <script>
+        const params = new URLSearchParams(window.location.search)
+
+        function approve() {
+            window.location.href = "/api/v1/auth/oauth2?" + params.toString()
+        }
+
+        function deny() {
+            alert("TODO: Deny")
+        }
+    </script>
+</body>
+
+</html>

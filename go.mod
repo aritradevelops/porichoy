@@ -7,6 +7,7 @@ require (
 	github.com/go-playground/validator/v10 v10.29.0
 	github.com/gofiber/contrib/fiberi18n/v2 v2.0.6
 	github.com/gofiber/fiber/v2 v2.52.10
+	github.com/gofiber/template/html/v2 v2.1.3
 	github.com/golang-jwt/jwt/v5 v5.3.0
 	github.com/google/uuid v1.6.0
 	github.com/jackc/pgerrcode v0.0.0-20250907135507-afb5586c32a6
@@ -15,7 +16,7 @@ require (
 	github.com/nicksnyder/go-i18n/v2 v2.6.0
 	github.com/rs/zerolog v1.34.0
 	github.com/spf13/cobra v1.10.2
-	github.com/stretchr/testify v1.9.0
+	github.com/stretchr/testify v1.10.0
 	go.yaml.in/yaml/v3 v3.0.4
 	golang.org/x/crypto v0.45.0
 	golang.org/x/text v0.31.0
@@ -27,6 +28,8 @@ require (
 	github.com/gabriel-vasile/mimetype v1.4.11 // indirect
 	github.com/go-playground/locales v0.14.1 // indirect
 	github.com/go-playground/universal-translator v0.18.1 // indirect
+	github.com/gofiber/template v1.8.3 // indirect
+	github.com/gofiber/utils v1.1.0 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/jackc/pgpassfile v1.0.0 // indirect
 	github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 // indirect

@@ -153,6 +153,11 @@
         if (res.ok) {
           alert("Login successful");
         }
+        const next = new URL(window.location.href).searchParams.get("next")
+        console.log("Next:", next)
+        if (next) {
+          window.location.href = next
+        }
       })
     }
   </script>

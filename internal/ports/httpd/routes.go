@@ -13,6 +13,8 @@ func (s *Server) setupRoutes() {
 	router.Get("/", s.ui.Index)
 	router.Get("/login", s.ui.Login)
 	router.Get("/register", s.ui.Register)
+	router.Get("/oauth2", authn.Middleware(true), s.ui.OAuth2)
+	router.Get("/profile", authn.Middleware(true), s.ui.Profile)
 
 	apiRouter := router.Group("/api/v1")
 	apiRouter.Get("/", s.handlers.Hello)
