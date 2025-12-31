@@ -7,3 +7,9 @@ flow =>
 2. user selects account
 3. promts user for his consent to sign in to the application
 4. 
+
+
+MFA flow => 
+1. choose mfa method
+2. verify mfa method
+3. give recovery codes

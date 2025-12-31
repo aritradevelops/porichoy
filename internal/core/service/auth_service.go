@@ -30,6 +30,12 @@ type RegisterUserPayload struct {
 	Password string `json:"password,omitempty" validate:"required"`
 }
 
+type RegisterUserResponse struct {
+	ID    string `json:"id,omitempty"`
+	Name  string `json:"name,omitempty"`
+	Email string `json:"email,omitempty"`
+}
+
 type LoginUserPayload struct {
 	Email     string `json:"email,omitempty" validate:"required,email"`
 	Password  string `json:"password,omitempty" validate:"required"`
@@ -37,10 +43,15 @@ type LoginUserPayload struct {
 	UserIP    string `json:"user_ip,omitempty" validate:"required"`
 	Host      string `json:"host,omitempty" validate:"required"`
 }
+type LoginUserResponse struct {
+	AccessToken        string    `json:"access_token,omitempty"`
+	RefreshToken       string    `json:"refresh_token,omitempty"`
+	AccessTokenExpiry  time.Time `json:"access_token_expiry,omitempty"`
+	RefreshTokenExpiry time.Time `json:"refresh_token_expiry,omitempty"`
+}
 
 type Oauth2Payload struct {
-	ClientID string `json:"client_id" validate:"required"`
-	// TODO: validate code or token
+	ClientID            string `json:"client_id" validate:"required"`
 	ResponseType        string `json:"response_type" validate:"required,oneof=code token"`
 	RedirectURI         string `json:"redirect_uri" validate:"required"`
 	CodeChallenge       string `json:"code_challenge"`
@@ -48,6 +59,23 @@ type Oauth2Payload struct {
 	State               string `json:"state"`
 	LoginHint           string `json:"login_hint"`
 	Nonce               string `json:"nonce"`
+}
+type Oauth2TokenResponse struct {
+	AccessToken          string    `json:"access_token"`
+	AccessTokenLifetime  time.Time `json:"access_token_lifetime"`
+	RefreshToken         string    `json:"refresh_token"`
+	RefreshTokenLifetime time.Time `json:"refresh_token_lifetime"`
+}
+type Oauth2CodeResponse struct {
+	Code        string `json:"code"`
+	RedirectURI string `json:"redirect_uri"`
+}
+
+type Oauth2Response struct {
+	App                 repository.App         `json:"app"`
+	OauthConfig         repository.OauthConfig `json:"oauth_config"`
+	Oauth2TokenResponse *Oauth2TokenResponse   `json:"oauth2_token_response"`
+	Oauth2CodeResponse  *Oauth2CodeResponse    `json:"oauth2_code_response"`
 }
 
 type Oauth2TokenPayload struct {
@@ -68,28 +96,6 @@ type Oauth2ConsentResponse struct {
 	AppName string `json:"app_name"`
 }
 
-type Oauth2TokenResponse struct {
-	AccessToken          string    `json:"access_token"`
-	AccessTokenLifetime  time.Time `json:"access_token_lifetime"`
-	RefreshToken         string    `json:"refresh_token"`
-	RefreshTokenLifetime time.Time `json:"refresh_token_lifetime"`
-	TokenType            string    `json:"token_type"`
-}
-
-type AuthTokens struct {
-	AccessToken        string    `json:"access_token,omitempty"`
-	RefreshToken       string    `json:"refresh_token,omitempty"`
-	AccessTokenExpiry  time.Time `json:"access_token_expiry,omitempty"`
-	RefreshTokenExpiry time.Time `json:"refresh_token_expiry,omitempty"`
-}
-
-type Oauth2Response struct {
-	Code        string                 `json:"code,omitempty"`
-	RedirectUrl string                 `json:"redirect_uri,omitempty"`
-	App         repository.App         `json:"app"`
-	OauthConfig repository.OauthConfig `json:"oauth_config"`
-}
-
 const (
 	OauthCodeLifetime = 10 * time.Minute
 )
@@ -104,24 +110,23 @@ var (
 	ErrInternalError           = errors.New("auth_service: internal error")
 )
 
-// Errors:
-//   - ErrUserExists
-func (s *Service) RegisterUser(ctx context.Context, payload RegisterUserPayload, isRootUser bool) (repository.User, error) {
+func (s *Service) RegisterUser(ctx context.Context, payload RegisterUserPayload, isRootUser bool) (RegisterUserResponse, error) {
+	var response RegisterUserResponse
 	var user repository.User
 	// validate payload
 	errs := validation.Validate(payload)
 	if errs != nil {
-		return user, errs
+		return response, errs
 	}
 	// validate password
 	errs = validation.ValidatePassword(payload.Password)
 	if errs != nil {
-		return user, errs
+		return response, errs
 	}
 	// check if user already exists
 	user, err := s.repository.FindUserByEmail(ctx, payload.Email)
 	if err == nil {
-		return user, ErrUserExists
+		return response, ErrUserExists
 	}
 	var userId uuid.UUID
 	// create new user
@@ -137,12 +142,12 @@ func (s *Service) RegisterUser(ctx context.Context, payload RegisterUserPayload,
 		CreatedBy: userId,
 	})
 	if err != nil {
-		return user, err
+		return response, err
 	}
 	// hash the password
 	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(payload.Password), bcrypt.DefaultCost)
 	if err != nil {
-		return user, err
+		return response, err
 	}
 	// store the password
 	err = s.repository.CreatePasswordForUser(ctx, repository.CreatePasswordForUserParams{
@@ -150,47 +155,50 @@ func (s *Service) RegisterUser(ctx context.Context, payload RegisterUserPayload,
 		CreatedBy:      user.ID,
 	})
 	if err != nil {
-		return user, err
+		return response, err
 	}
 
-	return user, nil
+	response.ID = user.ID.String()
+	response.Name = user.Name
+	response.Email = user.Email
+	return response, nil
 }
 
-func (s *Service) LoginUser(ctx context.Context, payload LoginUserPayload) (AuthTokens, error) {
+func (s *Service) LoginUser(ctx context.Context, payload LoginUserPayload) (LoginUserResponse, error) {
 	// validate payload
-	var tokens AuthTokens
+	var response LoginUserResponse
 	errs := validation.Validate(payload)
 	if errs != nil {
-		return tokens, errs
+		return response, errs
 	}
 	rootApp, err := s.repository.FindRootApp(ctx)
 	if err != nil {
 		logger.Error().Err(err).Msg("zero")
-		return tokens, err
+		return response, err
 	}
 
 	user, err := s.repository.FindUserByEmail(ctx, payload.Email)
 	if err != nil {
 		logger.Error().Err(err).Msg("one")
-		return tokens, ErrInvalidLoginCredentials
+		return response, ErrInvalidLoginCredentials
 	}
 
 	if user.DeactivatedAt != nil {
-		return tokens, ErrDeactivatedUser
+		return response, ErrDeactivatedUser
 	}
 
 	passwd, err := s.repository.FindUserPassword(ctx, user.ID)
 	if err != nil {
 		// if err is does not exist then throw invalid login method
 		logger.Error().Err(err).Msg("two")
-		return tokens, ErrInvalidLoginMethod
+		return response, ErrInvalidLoginMethod
 	}
 
 	// compare passwords
 	err = bcrypt.CompareHashAndPassword([]byte(passwd.HashedPassword), []byte(payload.Password))
 	if err != nil {
 		logger.Error().Err(err).Msg("three")
-		return tokens, ErrInvalidLoginCredentials
+		return response, ErrInvalidLoginCredentials
 	}
 
 	// sign tokens
@@ -208,12 +216,12 @@ func (s *Service) LoginUser(ctx context.Context, payload LoginUserPayload) (Auth
 
 	if err != nil {
 		logger.Error().Err(err).Msg("four")
-		return tokens, err
+		return response, err
 	}
 
 	refreshToken, err := cryptoutil.GenerateHash(32)
 	if err != nil {
-		return tokens, err
+		return response, err
 	}
 
 	// create session
@@ -227,46 +235,50 @@ func (s *Service) LoginUser(ctx context.Context, payload LoginUserPayload) (Auth
 		CreatedBy:    user.ID,
 	})
 	if err != nil {
-		return tokens, err
+		return response, err
 	}
 
-	tokens.AccessToken = accessToken
-	tokens.RefreshToken = refreshToken
-	tokens.AccessTokenExpiry = time.Now().Add(timex.Duration(rootApp.OauthConfig.JwtLifetime).Duration())
-	tokens.RefreshTokenExpiry = time.Now().Add(timex.Duration(rootApp.OauthConfig.RefreshTokenLifetime).Duration())
-	return tokens, nil
+	response.AccessToken = accessToken
+	response.RefreshToken = refreshToken
+	response.AccessTokenExpiry = time.Now().Add(timex.Duration(rootApp.OauthConfig.JwtLifetime).Duration())
+	response.RefreshTokenExpiry = time.Now().Add(timex.Duration(rootApp.OauthConfig.RefreshTokenLifetime).Duration())
+	return response, nil
+}
+
+func (s *Service) LogoutUser(ctx context.Context, initiator string) error {
+	return s.repository.DeleteSession(ctx, uuid.MustParse(initiator))
 }
 
 func (s *Service) Oauth2(ctx context.Context, initiator string, payload Oauth2Payload) (Oauth2Response, error) {
 	errs := validation.Validate(payload)
-	var resp Oauth2Response
+	var response Oauth2Response
 	if errs != nil {
-		return resp, errs
+		return response, errs
 	}
+	app, err := s.repository.FindAppByClientID(ctx, payload.ClientID)
+	if err != nil {
+		logger.Error().Err(err).Msg("one")
+		return response, ErrInvalidOauthCall
+	}
+	response.App = app.App
+	response.OauthConfig = app.OauthConfig
+
+	redirectUri, err := url.Parse(payload.RedirectURI)
+	if err != nil {
+		logger.Error().Err(err).Msg("two")
+		return response, ErrInvalidOauthCall
+	}
+	fmt.Println(app.OauthConfig.RedirectUris, strings.Split(redirectUri.String(), "?")[0])
+	if !slices.Contains(app.OauthConfig.RedirectUris, strings.Split(redirectUri.String(), "?")[0]) {
+		logger.Error().Err(err).Msg("three")
+		return response, ErrInvalidRedirectUri
+	}
+
 	if payload.ResponseType == ResponseTypeCode {
-		app, err := s.repository.FindAppByClientID(ctx, payload.ClientID)
-		if err != nil {
-			logger.Error().Err(err).Msg("one")
-			return resp, ErrInvalidOauthCall
-		}
-		resp.App = app.App
-		resp.OauthConfig = app.OauthConfig
-
-		redirectUri, err := url.Parse(payload.RedirectURI)
-		if err != nil {
-			logger.Error().Err(err).Msg("two")
-			return resp, ErrInvalidOauthCall
-		}
-		fmt.Println(app.OauthConfig.RedirectUris, strings.Split(redirectUri.String(), "?")[0])
-		if !slices.Contains(app.OauthConfig.RedirectUris, strings.Split(redirectUri.String(), "?")[0]) {
-			logger.Error().Err(err).Msg("three")
-			return resp, ErrInvalidRedirectUri
-		}
-
 		code, err := cryptoutil.GenerateHash(32)
 		if err != nil {
 			logger.Error().Err(err).Msg("four")
-			return resp, ErrInternalError
+			return response, ErrInternalError
 		}
 		err = s.repository.CreateOauthCall(ctx, repository.CreateOauthCallParams{
 			AppID:     app.App.ID,
@@ -276,18 +288,22 @@ func (s *Service) Oauth2(ctx context.Context, initiator string, payload Oauth2Pa
 		})
 		if err != nil {
 			logger.Error().Err(err).Msg("five")
-			return resp, ErrInternalError
+			return response, ErrInternalError
 		}
 		q := redirectUri.Query()
 		q.Add("code", code)
 		redirectUri.RawQuery = q.Encode()
 
-		resp.Code = code
-		resp.RedirectUrl = redirectUri.String()
-		return resp, nil
+		response.Oauth2CodeResponse = &Oauth2CodeResponse{
+			Code:        code,
+			RedirectURI: redirectUri.String(),
+		}
+		return response, nil
+	} else if payload.ResponseType == ResponseTypeToken {
+		// TODO: and as it is inherently insecure so it's not important as of now
 	}
 
-	return resp, nil
+	return response, nil
 }
 
 func (s *Service) Oauth2ConsentResponse(ctx context.Context, payload Oauth2ConsentPayload) (Oauth2ConsentResponse, error) {

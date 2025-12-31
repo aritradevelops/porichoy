@@ -24,7 +24,7 @@ func (s *Service) Configure(ctx context.Context, config ConfigurationPayload) er
 		return err
 	}
 	logger.Info().Any("root user", user).Msg("root user registered successfully!")
-	app, err := s.CreateApp(ctx, user.ID.String(), config.RootApp)
+	app, err := s.CreateApp(ctx, user.ID, config.RootApp)
 	if err != nil {
 		return err
 	}

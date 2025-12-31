@@ -110,17 +110,21 @@ func (h *Handlers) Oauth2(c *fiber.Ctx) error {
 	if err != nil {
 		return err
 	}
-	resp, err := h.service.Oauth2(c.Context(), user.UserID, service.Oauth2Payload(payload))
+	response, err := h.service.Oauth2(c.Context(), user.UserID, service.Oauth2Payload(payload))
 	if err != nil {
 		logger.Error().Err(err).Msg("oauth2 error")
-		if resp.OauthConfig.ErrorCallbackUrl != "" {
-			return c.Redirect(resp.OauthConfig.ErrorCallbackUrl)
+		if response.OauthConfig.ErrorCallbackUrl != "" {
+			return c.Redirect(response.OauthConfig.ErrorCallbackUrl)
 		}
 		// TODO: build an oauth error page and render error properly
 		return err
 	}
 
-	return c.Redirect(resp.RedirectUrl)
+	if response.Oauth2CodeResponse != nil {
+		return c.Redirect(response.Oauth2CodeResponse.RedirectURI)
+	}
+
+	return c.JSON(NewSuccessResponse(translation.Localize(c, "user.oauth2"), response))
 }
 
 func (h *Handlers) Token(c *fiber.Ctx) error {
@@ -142,4 +146,18 @@ func (h *Handlers) Token(c *fiber.Ctx) error {
 		return err
 	}
 	return c.JSON(NewSuccessResponse(translation.Localize(c, "user.token"), tokens))
+}
+
+func (h *Handlers) LogoutUser(c *fiber.Ctx) error {
+	user, err := authn.GetUserFromContext(c)
+	if err != nil {
+		return err
+	}
+	err = h.service.LogoutUser(c.Context(), user.UserID)
+	if err != nil {
+		return err
+	}
+	c.ClearCookie("access_token")
+	c.ClearCookie("refresh_token")
+	return c.JSON(NewSuccessResponse(translation.Localize(c, "user.logout"), nil))
 }

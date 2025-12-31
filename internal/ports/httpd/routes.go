@@ -24,6 +24,7 @@ func (s *Server) setupRoutes() {
 	authRouter.Post("/login", s.handlers.LoginUser)
 	authRouter.Get("/oauth2", authn.Middleware(true), s.handlers.Oauth2)
 	authRouter.Post("/token", s.handlers.Token)
+	authRouter.Post("/logout", authn.Middleware(), s.handlers.LogoutUser)
 	appRouter := apiRouter.Group("/apps", authn.Middleware())
 	appRouter.Post("/create", s.handlers.CreateApp)
 	configRouter := apiRouter.Group("/config")

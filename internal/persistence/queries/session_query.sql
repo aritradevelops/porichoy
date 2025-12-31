@@ -6,3 +6,6 @@ INSERT INTO "sessions" (
 );
 -- name: FindSessionByRefreshTokenAndAppID :one
 SELECT * FROM "sessions" WHERE "refresh_token" = $1 AND "app_id" = $2 AND expires_at > CURRENT_TIMESTAMP AND "deleted_at" IS NULL;
+
+-- name: DeleteSession :exec
+DELETE FROM "sessions" WHERE "user_id" = $1 AND "deleted_at" IS NULL;

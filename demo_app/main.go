@@ -32,9 +32,9 @@ func main() {
 	http.Handle("/", http.FileServer(http.FS(subFS)))
 	http.HandleFunc("/authorize", func(w http.ResponseWriter, r *http.Request) {
 		code := r.URL.Query().Get("code")
-		clientId := "localhost:5000"
-		clientSecret := "a4ea4cfe1be4513a8a65581097c07f29af99d2e602248d9e3f2efc8952e93fae2d08c647cfccfe01f7ec54fd194632b0eb0c20c75e8231e72e610b19876d05c7"
-		redirectURI := "http://localhost:5000/authorize"
+		clientId := "demo.local"
+		clientSecret := "6fcb20a444f96990ddd5d54a5471b2b41d55329ee97e6e18e0e370096c7eb3990e4c0468ed7006dd80c6aecd811daec1b1a7db4ff67da4b172c42efc125bebbc"
+		redirectURI := "http://demo.local:5000/authorize"
 		grantType := "authorization_code"
 
 		query := url.Values{
