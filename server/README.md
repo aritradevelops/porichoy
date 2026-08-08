@@ -6,7 +6,7 @@ The Porichoy backend. Go, monolith, hexagonal (ports & adapters) architecture �
 ```
 cmd/server/          entrypoint (main package)
 internal/
-  domain/            business logic, grouped by bounded context (wiki/CODING_STANDARDS.md §3):
+  domain/            business logic, grouped by bounded context (wiki/CODING_STANDARDS.md §4):
                        tenant/          Tenant, DomainRegistry, TenantProviderCredential
                        app/             App, Session
                        identity/        User, Password, MFAMethod, ExternalIdentity,
@@ -18,6 +18,11 @@ internal/
                      (e.g. identity/ defines User + UserRepository) — no separate ports/
                      package. Cross-package references are always by ID (uuid.UUID), never
                      an embedded struct pointer.
+  application/       cross-context use cases (wiki/CODING_STANDARDS.md §3), same 6-package
+                     grouping as domain/ above. What REST and MCP handlers actually call —
+                     e.g. application/organization.Service.CreateOrganization composes
+                     organization.Repository + authorization.Repository to create the org
+                     and assign its creator the Owner role, in one place, once.
   adapters/
     rest/             /api/{version}/{module}/{action} handlers + router (Fiber)
     mcp/              MCP server (wiki/MCP_TOOLS.md)

@@ -19,7 +19,7 @@ the UI will get their own conventions once those are underway.
 | UUID generation | [google/uuid](https://github.com/google/uuid), application-generated (not DB-generated) |
 | Test assertions/mocking | [testify](https://github.com/stretchr/testify) (`assert`/`require` + `mock`) |
 | Integration test infra | [testcontainers-go](https://golang.testcontainers.org/) |
-| i18n | exact package not pinned yet (`go-i18n` is the likely default) — see §7 |
+| i18n | exact package not pinned yet (`go-i18n` is the likely default) — see §8 |
 
 > **Interpreting "burn" as "Bun"** — flagging this rather than silently assuming, since the
 > library name was given verbally and Bun is the closest real Go ORM name to what was said.
@@ -30,7 +30,7 @@ the UI will get their own conventions once those are underway.
 - **Ports live with domain, not centralized.** Each domain package defines its own entity
   struct *and* the interfaces it needs — e.g. `internal/domain/identity` defines `User` and
   `UserRepository`. There is no separate `internal/ports` package; the scaffolded empty
-  `internal/ports/` directory has been removed to match (§9).
+  `internal/ports/` directory has been removed to match (§10).
 - **Bun models are separate from domain entities.** Domain packages have zero knowledge of
   Bun or Postgres. `internal/adapters/postgres` defines its own Bun-tagged model structs per
   entity and maps to/from the domain entity in the repository implementation. More mapping
@@ -38,12 +38,44 @@ the UI will get their own conventions once those are underway.
 - **Dependency injection is manual.** Explicit constructor calls wired up in `main.go` (or a
   small bootstrap package under `cmd/server`) — no DI framework/codegen.
 - **Domain errors carry their i18n key via a custom type.** A `DomainError` implementing the
-  `error` interface, carrying an i18n key (§7) — e.g.
+  `error` interface, carrying an i18n key (§8) — e.g.
   `domain.NewError("tenant.domain_already_registered")`. HTTP handlers `errors.As` it out to
-  build the response envelope (§4). Domain code never touches HTTP or i18n message text
+  build the response envelope (§5). Domain code never touches HTTP or i18n message text
   directly, just the key.
 
-## 3. Domain Modeling Conventions
+## 3. Application Layer
+
+`internal/application` sits between domain and adapters — this is where cross-context
+business logic lives, and it's what closes the gap domain packages deliberately leave open
+(entities + single-context repository ports only, §4).
+
+- **This is what REST and MCP handlers both call into.** The actual use cases — e.g. "create
+  an organization and auto-assign its creator the Owner role"
+  (USER_JOURNEYS_ORGANIZATIONS.md §1) — live here exactly once. Neither adapter
+  re-implements this logic; both are thin callers of the same application-layer methods, so
+  behavior can't drift between "created via the UI" and "created via an MCP tool call"
+  (MCP_TOOLS.md).
+- **Mirrors the 6 domain bounded contexts**: `application/tenant`, `application/app`,
+  `application/identity`, `application/organization`, `application/authorization`,
+  `application/audit` — same grouping as `internal/domain` (§4), for consistency.
+- **Each package exposes a `Service`** — a struct holding whatever domain repository
+  interfaces it needs, potentially from *multiple* domain packages (e.g.
+  `application/organization.Service` depends on both `organization.Repository` and
+  `authorization.Repository` to implement org creation + Owner-role assignment as one use
+  case). Constructed via manual DI (§2); exposes the actual use-case methods
+  (`CreateOrganization`, `InviteMember`, ...).
+- **Application services don't depend on each other** — each depends directly on domain
+  repository ports, not on sibling application-layer Services. Keeps the dependency graph a
+  simple star rather than a web.
+- **Handlers stay thin.** `internal/adapters/rest` and `internal/adapters/mcp` parse/validate
+  the incoming request, call one application `Service` method, and serialize the result — no
+  business logic in the handler itself.
+- **Transactional boundaries are owned here**, not in domain or adapters — a `Service` method
+  needing multiple repository calls to succeed or fail together (e.g. the org row *and* the
+  role assignment) coordinates that, even though the exact Bun transaction mechanics are an
+  adapter-level detail decided when that code gets written.
+
+## 4. Domain Modeling Conventions
 
 - **Nullable fields use pointers.** `*string`, `*time.Time`, etc. — not `sql.Null*` types
   (those are a database/sql-layer concern, and domain entities have zero knowledge of the
@@ -86,9 +118,12 @@ the UI will get their own conventions once those are underway.
   holds `AppID uuid.UUID`, not `App *app.App`. This is what makes the grouping above work
   without import cycles — e.g. `role.AppID` and `app.DefaultSignupRoleID` reference each
   other's tables in DATA_MODEL.md, but since both are plain `uuid.UUID` fields, neither the
-  `authorization` package nor the `app` package needs to import the other.
+  `authorization` package nor the `app` package needs to import the other. The same rule
+  applies one layer up: application-layer Services reference other contexts' entities by ID
+  too, reaching them through that context's repository port (§3), not a direct struct
+  reference.
 
-## 4. API Layer
+## 5. API Layer
 
 - **Routes are registered explicitly**, one per module/action, even though they follow the
   uniform `/api/{version}/{module}/{action}/{id?}` pattern (AUTHORIZATION_MODEL §1) — no
@@ -102,15 +137,18 @@ the UI will get their own conventions once those are underway.
   ```
   `data` is populated on success (`error` is `null`); `error` is populated on failure
   (`data` is `null`). `error.key` is the i18n key from the `DomainError` (§2); `error.message`
-  is that key resolved to text for the request's locale (§7).
+  is that key resolved to text for the request's locale (§8).
+- Handlers here (and the MCP equivalents in `internal/adapters/mcp`) are thin callers of
+  `internal/application` Services (§3) — routing/transport concerns only, no business logic.
 
-## 5. Testing
+## 6. Testing
 
 Both unit and integration tests are required — this isn't optional or "nice to have."
 
 - **Unit tests**: standard Go convention — `_test.go` files alongside the code they test.
-  Cover domain logic (`internal/domain`) and adapters in isolation, using `testify/mock`
-  fakes for the port interfaces a unit under test depends on.
+  Cover domain logic (`internal/domain`) and application Services (`internal/application`,
+  mocking the domain repository ports they depend on) in isolation, using `testify/mock`
+  fakes for any port interface a unit under test depends on.
 - **Integration tests**: exercise real Postgres/Redis via `testcontainers-go` — hermetic,
   per-test-run containers, no dependency on `server/deploy/docker-compose.yml` already being
   up. This matters especially for anything touching the scope-based query filtering
@@ -120,7 +158,7 @@ Both unit and integration tests are required — this isn't optional or "nice to
   `go test ./...` stays fast and infra-free by default; CI runs a separate
   `go test -tags=integration ./...` pass.
 
-## 6. Commenting
+## 7. Commenting
 
 - **Comments capture intention, not mechanics.** Explain *why* something is done a
   particular way — a non-obvious constraint, a workaround, a decision that would otherwise
@@ -135,7 +173,7 @@ Both unit and integration tests are required — this isn't optional or "nice to
   `// FuncName does X` form, one line where possible) since that's what godoc/IDE tooling
   surfaces — this isn't in tension with "minimal," a one-liner satisfies both.
 
-## 7. Error Messages (i18n)
+## 8. Error Messages (i18n)
 
 Error messages are never hardcoded strings in application code. Each error carries a
 **translation key** (via the `DomainError` type, §2), and the human-readable message is
@@ -154,16 +192,18 @@ resolved from a translation file at response time (based on requested locale —
 > **Open — exact locale-resolution mechanics** (which header, fallback locale, where
 > translation files live in the repo) not decided yet.
 
-## 8. Build Order
+## 9. Build Order
 
 Initial implementation order: **all domain models first** — write out every entity across
-every module (per the grouped packages in §3) in `internal/domain` before wiring up any HTTP
-handler, Postgres adapter, or auth flow. The domain layer is established as a stable
-foundation before anything is built on top of it, even though nothing is runnable end-to-end
-until adapters follow.
+every module (per the grouped packages in §4) in `internal/domain`, then the corresponding
+`internal/application` Service for each context (§3), before wiring up any HTTP handler,
+Postgres adapter, or auth flow. Domain and application are established as a stable
+foundation before anything is built on top of them, even though nothing is runnable
+end-to-end until the adapters follow.
 
-## 9. Scaffold Correction
+## 10. Scaffold Correction
 
 `server/internal/ports/` (with its placeholder `.gitkeep`) was created before this session's
 architecture decisions and is now stale per §2 — removed, since port interfaces live in
-their respective `internal/domain/*` packages instead.
+their respective `internal/domain/*` packages instead. `server/internal/application/` (§3),
+mirroring the same 6 bounded contexts as `internal/domain`, has been added to the scaffold.
