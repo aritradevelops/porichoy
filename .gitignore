@@ -1,0 +1,30 @@
+# macOS
+.DS_Store
+
+# Go (server/)
+server/bin/
+*.exe
+*.test
+*.out
+
+# Node / TypeScript (sdk/typescript, ui/)
+node_modules/
+dist/
+build/
+.env
+.env.local
+
+# Python (sdk/python)
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.egg-info/
+
+# IDE
+.vscode/
+.idea/
+
+# Config with secrets
+*.local.yaml
+*.local.yml
