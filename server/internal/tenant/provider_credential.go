@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/aritradevelops/porichoy/server/internal/actor"
 	"github.com/google/uuid"
 )
 
@@ -46,7 +47,7 @@ func (c *ProviderCredential) IsDeleted() bool {
 type ProviderCredentialRepository interface {
 	// Upsert creates or replaces the credential for c's (TenantID, ProviderType) pair.
 	Upsert(ctx context.Context, c *ProviderCredential) error
-	FindByTenantAndType(ctx context.Context, tenantID uuid.UUID, providerType ProviderType) (*ProviderCredential, error)
-	ListByTenant(ctx context.Context, tenantID uuid.UUID) ([]*ProviderCredential, error)
-	SoftDelete(ctx context.Context, id uuid.UUID, deletedBy *uuid.UUID) error
+	FindByTenantAndType(ctx context.Context, act actor.Actor, tenantID uuid.UUID, providerType ProviderType) (*ProviderCredential, error)
+	ListByTenant(ctx context.Context, act actor.Actor, tenantID uuid.UUID) ([]*ProviderCredential, error)
+	SoftDelete(ctx context.Context, act actor.Actor, id uuid.UUID) error
 }

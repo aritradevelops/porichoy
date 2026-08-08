@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/aritradevelops/porichoy/server/internal/actor"
 	"github.com/aritradevelops/porichoy/server/internal/apperror"
 	"github.com/google/uuid"
 )
@@ -24,10 +25,34 @@ func NewService(
 	return &Service{tenants: tenants, domains: domains, creds: creds}
 }
 
-// CreateTenant creates a new tenant. parentID is nil only for the root tenant — that's
-// bootstrapped by the CLI seed command (USER_JOURNEYS_ADMIN_TENANT_MANAGEMENT.md §1), not
-// this method; this is for creating brand/child tenants under an existing one (§2).
-func (s *Service) CreateTenant(ctx context.Context, name string, parentID *uuid.UUID, createdBy *uuid.UUID) (*Tenant, error) {
+// CreateRootTenant creates the root tenant. This is the CLI seed command's bootstrap step
+// (USER_JOURNEYS_ADMIN_TENANT_MANAGEMENT.md §1) and only ever runs once, before any
+// principal or actor.Actor exists at all — so, unlike CreateTenant, it takes no actor.Actor.
+// ParentID, CreatedBy, and UpdatedBy are all nil (system-generated, DATA_MODEL.md §0).
+func (s *Service) CreateRootTenant(ctx context.Context, name string) (*Tenant, error) {
+	now := time.Now()
+	t := &Tenant{
+		ID:          uuid.New(),
+		ParentID:    nil,
+		Name:        name,
+		LoginLayout: LoginLayoutCentered, // sane default until configured via §3
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	}
+	if err := s.tenants.Create(ctx, t); err != nil {
+		return nil, err
+	}
+	return t, nil
+}
+
+// CreateTenant creates a brand/child tenant under an existing one
+// (USER_JOURNEYS_ADMIN_TENANT_MANAGEMENT.md §2) — an authorized operation, unlike root-tenant
+// bootstrap (CreateRootTenant). If parentID is nil, it defaults to the caller's own tenant
+// (MCP_TOOLS.md tenant_create).
+func (s *Service) CreateTenant(ctx context.Context, act actor.Actor, name string, parentID *uuid.UUID) (*Tenant, error) {
+	if parentID == nil {
+		parentID = &act.TenantID
+	}
 	now := time.Now()
 	t := &Tenant{
 		ID:          uuid.New(),
@@ -36,8 +61,8 @@ func (s *Service) CreateTenant(ctx context.Context, name string, parentID *uuid.
 		LoginLayout: LoginLayoutCentered, // sane default until configured via §3
 		CreatedAt:   now,
 		UpdatedAt:   now,
-		CreatedBy:   createdBy,
-		UpdatedBy:   createdBy,
+		CreatedBy:   &act.PrincipalID,
+		UpdatedBy:   &act.PrincipalID,
 	}
 	if err := s.tenants.Create(ctx, t); err != nil {
 		return nil, err
@@ -46,8 +71,8 @@ func (s *Service) CreateTenant(ctx context.Context, name string, parentID *uuid.
 }
 
 // GetTenant fetches a tenant by ID.
-func (s *Service) GetTenant(ctx context.Context, id uuid.UUID) (*Tenant, error) {
-	return s.tenants.GetByID(ctx, id)
+func (s *Service) GetTenant(ctx context.Context, act actor.Actor, id uuid.UUID) (*Tenant, error) {
+	return s.tenants.GetByID(ctx, act, id)
 }
 
 // ResolveTenantByDomain resolves which tenant owns the given origin — the tenant-resolution
@@ -62,14 +87,14 @@ func (s *Service) ResolveTenantByDomain(ctx context.Context, domain string) (*Te
 	if d == nil {
 		return nil, nil
 	}
-	return s.tenants.GetByID(ctx, d.TenantID)
+	return s.tenants.FindByID(ctx, d.TenantID)
 }
 
 // RegisterDomain registers a new allowed origin for tenantID. Domains are unique across
 // the whole instance, not just within one tenant (DATA_MODEL.md `domain_registry`) — this
 // check exists to return a clean DomainError instead of a raw constraint violation; the
 // database-level unique constraint remains the actual invariant enforcer.
-func (s *Service) RegisterDomain(ctx context.Context, tenantID uuid.UUID, domain string, createdBy *uuid.UUID) (*TenantDomain, error) {
+func (s *Service) RegisterDomain(ctx context.Context, act actor.Actor, tenantID uuid.UUID, domain string) (*TenantDomain, error) {
 	existing, err := s.domains.FindByDomain(ctx, domain)
 	if err != nil {
 		return nil, err
@@ -83,7 +108,7 @@ func (s *Service) RegisterDomain(ctx context.Context, tenantID uuid.UUID, domain
 		TenantID:  tenantID,
 		Domain:    domain,
 		CreatedAt: time.Now(),
-		CreatedBy: createdBy,
+		CreatedBy: &act.PrincipalID,
 	}
 	if err := s.domains.Create(ctx, d); err != nil {
 		return nil, err
@@ -103,8 +128,8 @@ type Config struct {
 }
 
 // ConfigureTenant applies a partial update to tenantID's settings.
-func (s *Service) ConfigureTenant(ctx context.Context, tenantID uuid.UUID, cfg Config, updatedBy *uuid.UUID) (*Tenant, error) {
-	t, err := s.tenants.GetByID(ctx, tenantID)
+func (s *Service) ConfigureTenant(ctx context.Context, act actor.Actor, tenantID uuid.UUID, cfg Config) (*Tenant, error) {
+	t, err := s.tenants.GetByID(ctx, act, tenantID)
 	if err != nil {
 		return nil, err
 	}
@@ -131,7 +156,7 @@ func (s *Service) ConfigureTenant(ctx context.Context, tenantID uuid.UUID, cfg C
 		t.AuditRetentionDays = *cfg.AuditRetentionDays
 	}
 	t.UpdatedAt = time.Now()
-	t.UpdatedBy = updatedBy
+	t.UpdatedBy = &act.PrincipalID
 
 	if err := s.tenants.Update(ctx, t); err != nil {
 		return nil, err
@@ -149,12 +174,12 @@ func (s *Service) ConfigureTenant(ctx context.Context, tenantID uuid.UUID, cfg C
 // responsible. Flagging rather than silently deferring the decision.
 func (s *Service) SetProviderCredential(
 	ctx context.Context,
+	act actor.Actor,
 	tenantID uuid.UUID,
 	providerType ProviderType,
 	configEncrypted []byte,
-	actorID *uuid.UUID,
 ) (*ProviderCredential, error) {
-	existing, err := s.creds.FindByTenantAndType(ctx, tenantID, providerType)
+	existing, err := s.creds.FindByTenantAndType(ctx, act, tenantID, providerType)
 	if err != nil {
 		return nil, err
 	}
@@ -163,7 +188,7 @@ func (s *Service) SetProviderCredential(
 	if existing != nil {
 		existing.ConfigEncrypted = configEncrypted
 		existing.UpdatedAt = now
-		existing.UpdatedBy = actorID
+		existing.UpdatedBy = &act.PrincipalID
 		if err := s.creds.Upsert(ctx, existing); err != nil {
 			return nil, err
 		}
@@ -177,8 +202,8 @@ func (s *Service) SetProviderCredential(
 		ConfigEncrypted: configEncrypted,
 		CreatedAt:       now,
 		UpdatedAt:       now,
-		CreatedBy:       actorID,
-		UpdatedBy:       actorID,
+		CreatedBy:       &act.PrincipalID,
+		UpdatedBy:       &act.PrincipalID,
 	}
 	if err := s.creds.Upsert(ctx, c); err != nil {
 		return nil, err

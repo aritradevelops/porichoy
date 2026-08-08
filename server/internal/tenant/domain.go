@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/aritradevelops/porichoy/server/internal/actor"
 	"github.com/google/uuid"
 )
 
@@ -34,7 +35,13 @@ type DomainRepository interface {
 	Create(ctx context.Context, d *TenantDomain) error
 	// FindByDomain resolves the tenant a given origin belongs to. Returns nil,
 	// nil if no tenant has registered this domain.
+	//
+	// This is a global, unique-key lookup — used both pre-authentication (tenant
+	// resolution, TECHNICAL_DESIGN.md §3.3, which runs before an actor.Actor can even
+	// exist) and inside authorized flows (RegisterDomain's uniqueness check). Domain
+	// uniqueness is instance-wide, never scoped, so this method never takes an Actor,
+	// in either context.
 	FindByDomain(ctx context.Context, domain string) (*TenantDomain, error)
-	ListByTenant(ctx context.Context, tenantID uuid.UUID) ([]*TenantDomain, error)
-	SoftDelete(ctx context.Context, id uuid.UUID, deletedBy *uuid.UUID) error
+	ListByTenant(ctx context.Context, act actor.Actor, tenantID uuid.UUID) ([]*TenantDomain, error)
+	SoftDelete(ctx context.Context, act actor.Actor, id uuid.UUID) error
 }

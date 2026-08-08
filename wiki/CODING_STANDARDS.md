@@ -46,6 +46,15 @@ the UI will get their own conventions once those are underway.
   `apperror.New("tenant.domain_already_registered")`. HTTP handlers `errors.As` it out to
   build the response envelope (§5). Business logic never touches HTTP or i18n message text
   directly, just the key.
+- **`internal/actor` is a small, dependency-free exception to "no domain/application
+  split."** It isn't a bounded context — it holds one thing, the `Actor` struct (who's
+  calling, their tenant/app/org, and their resolved authorization scope,
+  AUTHORIZATION_MODEL.md §2), and depends on nothing but `uuid`. It deliberately doesn't
+  live inside `internal/authorization` (§4's table) — that package is its own bounded
+  context (Role/RoleAssignment/APICredential) and shouldn't become a mandatory kernel
+  dependency for every other package just because it happens to also own scope-ranking
+  logic. Whichever bounded-context packages have authorized-only operations import
+  `internal/actor` for this one parameter type; see §4 for exactly when a method takes one.
 
 ## 3. Package Structure
 
@@ -70,6 +79,11 @@ any of these.
 - **Services don't depend on sibling Services**, only on repository ports (their own
   context's and, per above, other contexts' when a use case genuinely spans both). Keeps the
   dependency graph a simple star rather than a web.
+- **Depending on `internal/actor` isn't the same kind of cross-context dependency as the
+  point above.** That's about one bounded context calling into another's business logic
+  through a repository interface. `actor.Actor` carries no behavior, just data — every
+  package that accepts one as a parameter doesn't turn the star into a web, it's just
+  consuming a shared, inert value type (§2).
 - **Handlers stay thin.** `internal/adapters/rest` and `internal/adapters/mcp` parse/validate
   the incoming request, call one `Service` method, and serialize the result — no business
   logic in the handler itself.
@@ -126,6 +140,26 @@ any of these.
   `authorization` package nor the `app` package needs to import the other's *entity* type.
   Services do reach across contexts (§3) — but through a repository *interface*, still never
   an embedded struct.
+- **A `Repository` method takes `act actor.Actor` only when the operation is authorized-only
+  *and* doesn't already receive a full entity carrying `CreatedBy`/`UpdatedBy`.** Not
+  blanket-added to every method:
+  - `Create`/`Update`/`Upsert`-style methods take the entity itself, which the `Service`
+    already stamped with the caller's id — adding `Actor` too would be redundant.
+  - Methods with no entity to carry that (`SoftDelete`, list/get-style lookups that are only
+    ever reached via an authorized route) take `act actor.Actor` — this is what a Postgres
+    adapter implementation uses to build the scope-based query filter
+    (AUTHORIZATION_MODEL.md §4).
+  - Public/pre-authentication lookups take **no `Actor` at all**, ever — not even a nil or
+    zero-value one. `internal/tenant`'s `Repository.FindByID` and `DomainRepository.FindByDomain`
+    are the concrete examples: both back `Service.ResolveTenantByDomain`
+    (TECHNICAL_DESIGN.md §3.3), which runs *before* authentication, so no `Actor` can exist
+    yet. Where the same underlying data also needs an authorized, scope-filtered lookup
+    (e.g. an admin fetching a tenant by id), that's a separate method (`GetByID`) — not the
+    same method with an optional/fake actor.
+  - System-generated actions with no caller at all (the CLI seed command bootstrapping the
+    root tenant, USER_JOURNEYS_ADMIN_TENANT_MANAGEMENT.md §1) get their own dedicated method
+    too (`Service.CreateRootTenant`, distinct from the authorized `Service.CreateTenant`) —
+    consistent with `actor.Actor` never being nil/optional (§2).
 
 ## 5. API Layer
 
@@ -134,7 +168,15 @@ any of these.
   dynamic dispatch/registry-lookup indirection. Easier to grep a URL straight to its handler.
 - **Middleware is chained, one concern per middleware**: tenant resolution → authentication
   → authorization (AUTHORIZATION_MODEL §2), as three separate, independently testable Fiber
-  middleware functions in that order — not folded into fewer, larger ones.
+  middleware functions in that order — not folded into fewer, larger ones. The authorization
+  middleware is what builds an `actor.Actor` (`internal/actor`, §2) from the resolved
+  tenant/authenticated principal/permission lookup, and hands it to the handler via Fiber
+  `Locals` — the *only* place an `Actor` crosses from Fiber-land into domain code. The
+  handler extracts it immediately and passes it on as an explicit Go parameter from there;
+  domain and adapter code never touches Fiber's request object directly, consistent with
+  entities having zero knowledge of the delivery mechanism (§2). Routes that don't run this
+  full chain (public/pre-authentication ones, e.g. tenant resolution itself) call `Service`
+  methods that simply don't take an `Actor` parameter (§4) — there's nothing to hand off.
 - **Response envelope**, for every success and error response alike:
   ```json
   { "data": ..., "error": { "key": "...", "message": "..." } }
