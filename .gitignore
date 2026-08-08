@@ -3,6 +3,7 @@
 
 # Go (server/)
 server/bin/
+/server/server
 *.exe
 *.test
 *.out

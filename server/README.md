@@ -6,28 +6,35 @@ The Porichoy backend. Go, monolith, hexagonal (ports & adapters) architecture �
 ```
 cmd/server/          entrypoint (main package)
 internal/
-  domain/            business logic — tenant, app, user, org, role, permission, session,
-                     audit... the same "module" vocabulary used by the API route
-                     convention and the {module}:{action}@{scope} permission format
-                     (wiki/AUTHORIZATION_MODEL.md)
-  ports/              interfaces: repositories, CachePort, SecretsPort, EncryptionPort,
-                     LogSinkPort, TokenSigner, EmailPort, SMSPort
+  domain/            business logic, grouped by bounded context (wiki/CODING_STANDARDS.md §3):
+                       tenant/          Tenant, DomainRegistry, TenantProviderCredential
+                       app/             App, Session
+                       identity/        User, Password, MFAMethod, ExternalIdentity,
+                                        VerificationToken
+                       organization/    Organization, OrgMembership
+                       authorization/   Role, RoleAssignment, APICredential
+                       audit/           AuditLog
+                     Each package defines its own entities AND the port interfaces it needs
+                     (e.g. identity/ defines User + UserRepository) — no separate ports/
+                     package. Cross-package references are always by ID (uuid.UUID), never
+                     an embedded struct pointer.
   adapters/
-    rest/             /api/{version}/{module}/{action} handlers + router
+    rest/             /api/{version}/{module}/{action} handlers + router (Fiber)
     mcp/              MCP server (wiki/MCP_TOOLS.md)
-    postgres/         repository implementations
+    postgres/         repository implementations (Bun)
     cache/redis/      default cache provider
     secrets/          env/file, vault, kms
     logsink/          postgres + external sink
     email/, sms/      OTP delivery providers
     crypto/           encryption-at-rest adapter
-migrations/           SQL, golang-migrate/goose
+migrations/           SQL, goose
 config/               default YAML + schema
 deploy/               docker-compose.yml, etc.
 ```
 
 Schema: [`wiki/DATA_MODEL.md`](../wiki/DATA_MODEL.md). Journeys implemented here:
-[`wiki/user-journeys/`](../wiki/user-journeys).
+[`wiki/user-journeys/`](../wiki/user-journeys). Testing/commenting/i18n conventions:
+[`wiki/CODING_STANDARDS.md`](../wiki/CODING_STANDARDS.md).
 
 ## Running
 

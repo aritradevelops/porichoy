@@ -46,6 +46,8 @@ are defined in the PRD — this document assumes that scope and answers "how."
 | Layer | Choice |
 |---|---|
 | Backend language | Go |
+| HTTP framework | Fiber |
+| ORM / SQL layer | Bun |
 | Primary datastore | PostgreSQL |
 | Cache provider | Pluggable (port/adapter); default implementation is Redis, other providers can be adopted by self-hosters |
 | UI | Single default theme (SPA) covering login, signup, self-service account management, org switcher, and permission-gated admin — no separate admin dashboard. Fully swappable for a custom theme built against the REST API/SDKs. |
@@ -54,10 +56,14 @@ are defined in the PRD — this document assumes that scope and answers "how."
 | Programmatic access | MCP server, as an additional port onto the core logic |
 | Packaging | Docker Compose (primary quick-start); Go binary is natural given the language, self-hosters may run Postgres/Redis separately |
 | Instance-level config | Config file (YAML) with env var overrides (12-factor style) |
-| DB migrations | Go migration library (golang-migrate/goose) |
+| DB migrations | goose |
+| Error messages | i18n — resolved from translation files by key, never hardcoded strings (see CODING_STANDARDS.md) |
 | Metrics export | Prometheus (`/metrics` endpoint) |
 | Health checks | `/healthz` (liveness), `/readyz` (readiness — DB/Redis reachability) |
 | License | MIT |
+
+See [CODING_STANDARDS.md](./CODING_STANDARDS.md) for testing strategy, commenting
+conventions, and how the i18n error-message pattern actually works.
 
 ## 3. Multi-Tenancy & Data Model
 
@@ -277,8 +283,7 @@ non-visibility to app-scoped admins is actually enforced at the query-filter lev
   supported path for v1.
 - **Configuration**: YAML config file for structured instance-level settings, with env var
   overrides for containerized/secret-injection workflows.
-- **Migrations**: managed via a Go migration library (golang-migrate or goose), run as part
-  of deploy/startup.
+- **Migrations**: managed via goose, run as part of deploy/startup.
 - **Scale target**: small/medium for now — designed for a handful of brand tenants and their
   apps at today's scale, not hyperscale multi-tenant SaaS. Revisit tenant-isolation and
   permission-caching choices (§3.1, §6) if this changes materially.
