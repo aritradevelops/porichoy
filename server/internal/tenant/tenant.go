@@ -1,5 +1,9 @@
 // Package tenant models the tenant hierarchy and its per-tenant configuration
-// (DATA_MODEL.md §1: Tenant, DomainRegistry, TenantProviderCredential).
+// (DATA_MODEL.md §1: Tenant, DomainRegistry, TenantProviderCredential), and implements
+// the tenant-management use cases (Service, in service.go) that the REST and MCP
+// adapters call into (CODING_STANDARDS.md §3) — creating tenants, registering domains,
+// and configuring tenant-level settings (USER_JOURNEYS_ADMIN_TENANT_MANAGEMENT.md §2–§3,
+// MCP_TOOLS.md §4).
 package tenant
 
 import (

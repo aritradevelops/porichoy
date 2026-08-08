@@ -1,0 +1,187 @@
+package tenant
+
+import (
+	"context"
+	"time"
+
+	"github.com/aritradevelops/porichoy/server/internal/apperror"
+	"github.com/google/uuid"
+)
+
+// Service implements the tenant use cases.
+type Service struct {
+	tenants Repository
+	domains DomainRepository
+	creds   ProviderCredentialRepository
+}
+
+// NewService wires a Service from its domain repository dependencies.
+func NewService(
+	tenants Repository,
+	domains DomainRepository,
+	creds ProviderCredentialRepository,
+) *Service {
+	return &Service{tenants: tenants, domains: domains, creds: creds}
+}
+
+// CreateTenant creates a new tenant. parentID is nil only for the root tenant — that's
+// bootstrapped by the CLI seed command (USER_JOURNEYS_ADMIN_TENANT_MANAGEMENT.md §1), not
+// this method; this is for creating brand/child tenants under an existing one (§2).
+func (s *Service) CreateTenant(ctx context.Context, name string, parentID *uuid.UUID, createdBy *uuid.UUID) (*Tenant, error) {
+	now := time.Now()
+	t := &Tenant{
+		ID:          uuid.New(),
+		ParentID:    parentID,
+		Name:        name,
+		LoginLayout: LoginLayoutCentered, // sane default until configured via §3
+		CreatedAt:   now,
+		UpdatedAt:   now,
+		CreatedBy:   createdBy,
+		UpdatedBy:   createdBy,
+	}
+	if err := s.tenants.Create(ctx, t); err != nil {
+		return nil, err
+	}
+	return t, nil
+}
+
+// GetTenant fetches a tenant by ID.
+func (s *Service) GetTenant(ctx context.Context, id uuid.UUID) (*Tenant, error) {
+	return s.tenants.GetByID(ctx, id)
+}
+
+// ResolveTenantByDomain resolves which tenant owns the given origin — the tenant-resolution
+// lookup every incoming request goes through (TECHNICAL_DESIGN §3.3). Returns nil, nil if
+// no tenant has registered this domain, rather than an error — "not found" is an expected
+// outcome here, not a failure.
+func (s *Service) ResolveTenantByDomain(ctx context.Context, domain string) (*Tenant, error) {
+	d, err := s.domains.FindByDomain(ctx, domain)
+	if err != nil {
+		return nil, err
+	}
+	if d == nil {
+		return nil, nil
+	}
+	return s.tenants.GetByID(ctx, d.TenantID)
+}
+
+// RegisterDomain registers a new allowed origin for tenantID. Domains are unique across
+// the whole instance, not just within one tenant (DATA_MODEL.md `domain_registry`) — this
+// check exists to return a clean DomainError instead of a raw constraint violation; the
+// database-level unique constraint remains the actual invariant enforcer.
+func (s *Service) RegisterDomain(ctx context.Context, tenantID uuid.UUID, domain string, createdBy *uuid.UUID) (*TenantDomain, error) {
+	existing, err := s.domains.FindByDomain(ctx, domain)
+	if err != nil {
+		return nil, err
+	}
+	if existing != nil {
+		return nil, apperror.New("tenant.domain_already_registered")
+	}
+
+	d := &TenantDomain{
+		ID:        uuid.New(),
+		TenantID:  tenantID,
+		Domain:    domain,
+		CreatedAt: time.Now(),
+		CreatedBy: createdBy,
+	}
+	if err := s.domains.Create(ctx, d); err != nil {
+		return nil, err
+	}
+	return d, nil
+}
+
+// Config is a partial update to a tenant's settings (USER_JOURNEYS_ADMIN_TENANT_MANAGEMENT.md
+// §3) — nil fields are left unchanged.
+type Config struct {
+	LogoURL             *string
+	BrandImageURL       *string
+	LoginLayout         *LoginLayout
+	MFARequired         *bool
+	EnabledLoginMethods []LoginMethod // nil means unchanged; non-nil replaces wholesale
+	AuditRetentionDays  *int
+}
+
+// ConfigureTenant applies a partial update to tenantID's settings.
+func (s *Service) ConfigureTenant(ctx context.Context, tenantID uuid.UUID, cfg Config, updatedBy *uuid.UUID) (*Tenant, error) {
+	t, err := s.tenants.GetByID(ctx, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	if t == nil {
+		return nil, apperror.New("tenant.not_found")
+	}
+
+	if cfg.LogoURL != nil {
+		t.LogoURL = *cfg.LogoURL
+	}
+	if cfg.BrandImageURL != nil {
+		t.BrandImageURL = cfg.BrandImageURL
+	}
+	if cfg.LoginLayout != nil {
+		t.LoginLayout = *cfg.LoginLayout
+	}
+	if cfg.MFARequired != nil {
+		t.MFARequired = *cfg.MFARequired
+	}
+	if cfg.EnabledLoginMethods != nil {
+		t.EnabledLoginMethods = cfg.EnabledLoginMethods
+	}
+	if cfg.AuditRetentionDays != nil {
+		t.AuditRetentionDays = *cfg.AuditRetentionDays
+	}
+	t.UpdatedAt = time.Now()
+	t.UpdatedBy = updatedBy
+
+	if err := s.tenants.Update(ctx, t); err != nil {
+		return nil, err
+	}
+	return t, nil
+}
+
+// SetProviderCredential creates or replaces tenantID's credential for the given provider
+// (MCP_TOOLS.md tenant_set_provider_credential).
+//
+// configEncrypted is expected already encrypted — this method doesn't perform encryption
+// itself. TECHNICAL_DESIGN §8 calls for an application-level encryption port that this
+// Service should eventually own calling (encrypt-before-persist belongs in orchestration,
+// not scattered across callers); that port doesn't exist yet, so for now the caller is
+// responsible. Flagging rather than silently deferring the decision.
+func (s *Service) SetProviderCredential(
+	ctx context.Context,
+	tenantID uuid.UUID,
+	providerType ProviderType,
+	configEncrypted []byte,
+	actorID *uuid.UUID,
+) (*ProviderCredential, error) {
+	existing, err := s.creds.FindByTenantAndType(ctx, tenantID, providerType)
+	if err != nil {
+		return nil, err
+	}
+
+	now := time.Now()
+	if existing != nil {
+		existing.ConfigEncrypted = configEncrypted
+		existing.UpdatedAt = now
+		existing.UpdatedBy = actorID
+		if err := s.creds.Upsert(ctx, existing); err != nil {
+			return nil, err
+		}
+		return existing, nil
+	}
+
+	c := &ProviderCredential{
+		ID:              uuid.New(),
+		TenantID:        tenantID,
+		ProviderType:    providerType,
+		ConfigEncrypted: configEncrypted,
+		CreatedAt:       now,
+		UpdatedAt:       now,
+		CreatedBy:       actorID,
+		UpdatedBy:       actorID,
+	}
+	if err := s.creds.Upsert(ctx, c); err != nil {
+		return nil, err
+	}
+	return c, nil
+}
