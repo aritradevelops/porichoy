@@ -7,7 +7,7 @@ in one unified surface (no separate admin dashboard). See
 [`wiki/user-journeys/`](../wiki/user-journeys) for the flows it needs to implement.
 
 Fully swappable — self-hosters can replace this with their own custom theme built against
-the REST API. Not against `sdk/typescript`, which targets third-party *apps* integrating
+the REST API. Not against `sdk/typescript`, which targets third-party _apps_ integrating
 "Login with Porichoy," not this UI or a custom theme replacing it — instead, `src/lib/client`
 (this app's own thin API client + headless auth-flow hooks, no styled components) is the
 reference a custom theme is expected to read/copy from. See

@@ -1,0 +1,145 @@
+@import 'tailwindcss';
+@import 'tw-animate-css';
+@import 'shadcn/tailwind.css';
+@import '@fontsource-variable/geist';
+@import '@fontsource-variable/geist-mono';
+
+@custom-variant dark (&:is(.dark *));
+
+/*
+ * Design tokens — UI_CODING_STANDARDS.md §5.1. Decided by exploring live token
+ * combinations, not picked upfront; see that doc for the alternatives considered
+ * at each axis before changing a value here.
+ */
+:root {
+  /* Palette: Mono */
+  --bg: #faf9f9;
+  --bg-elevated: #ffffff;
+  --bg-sidebar: #f0f0ee;
+  --text: #101010;
+  --text-muted: #6e6e6c;
+  --border: #dededa;
+  --accent: #1f4fd6;
+  --accent-contrast: #ffffff;
+  --success: #1f8a4c;
+  --warning: #a6740a;
+  --danger: #b0281e;
+
+  /* Radius: Sharp */
+  --r-xs: 2px;
+  --r-sm: 3px;
+  --r-md: 4px;
+  --r-lg: 6px;
+  --r-pill: 4px;
+
+  /* Density: Comfortable */
+  --space-card-padding: 20px;
+  --space-section-gap: 20px;
+  --control-height: 34px;
+  --sidebar-width: 256px;
+  --topbar-height: 60px;
+  --content-max-width: 900px;
+
+  /* Shadow: Soft — border stays visible alongside the shadow */
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.06), 0 6px 20px rgba(0, 0, 0, 0.06);
+}
+
+.dark {
+  --bg: #0d0d0c;
+  --bg-elevated: #171716;
+  --bg-sidebar: #050505;
+  --text: #f2f2ef;
+  --text-muted: #9a9a96;
+  --border: #2c2c29;
+  --accent: #6e93ff;
+  --accent-contrast: #0a1230;
+  --success: #45be7b;
+  --warning: #dda53e;
+  --danger: #e2564a;
+
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.4), 0 6px 20px rgba(0, 0, 0, 0.35);
+}
+
+/*
+ * shadcn/ui variable mapping — our tokens above are the source of truth;
+ * these just satisfy the names shadcn's generated components expect.
+ */
+:root {
+  --background: var(--bg);
+  --foreground: var(--text);
+  --card: var(--bg-elevated);
+  --card-foreground: var(--text);
+  --popover: var(--bg-elevated);
+  --popover-foreground: var(--text);
+  --primary: var(--accent);
+  --primary-foreground: var(--accent-contrast);
+  --secondary: var(--bg-sidebar);
+  --secondary-foreground: var(--text);
+  --muted: var(--bg-sidebar);
+  --muted-foreground: var(--text-muted);
+  --accent-foreground: var(--accent-contrast);
+  --destructive: var(--danger);
+  --input: var(--border);
+  --ring: var(--accent);
+  --radius: var(--r-md);
+
+  /* Sidebar treatment: Flush — full-height, edge-to-edge, 1px right border */
+  --sidebar: var(--bg-sidebar);
+  --sidebar-foreground: var(--text);
+  --sidebar-primary: var(--accent);
+  --sidebar-primary-foreground: var(--accent-contrast);
+  --sidebar-accent: var(--bg-elevated);
+  --sidebar-accent-foreground: var(--text);
+  --sidebar-border: var(--border);
+  --sidebar-ring: var(--accent);
+}
+
+@theme inline {
+  --font-sans: 'Geist Variable', system-ui, sans-serif;
+  --font-mono: 'Geist Mono Variable', ui-monospace, monospace;
+
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+
+  --radius-xs: var(--r-xs);
+  --radius-sm: var(--r-sm);
+  --radius-md: var(--r-md);
+  --radius-lg: var(--r-lg);
+  --radius-pill: var(--r-pill);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground font-sans;
+  }
+}

@@ -82,6 +82,49 @@ mirroring how CODING_STANDARDS.md preceded `server/` implementation (CODING_STAN
 
 ## 5. Styling & Components
 
+### 5.1 Approved Visual Language
+
+Decided by exploring live token combinations (color, radius, density, shadow, layout,
+sidebar treatment, surface, accent intensity, icon weight, content width) rather than
+picked upfront — the alternatives considered at each axis are noted below so a future
+revisit has the tradeoff on record, not just the winner.
+
+| Axis | Decision | Alternatives considered |
+|---|---|---|
+| Palette | **Mono** — near-monochrome ink/paper neutrals with a single restrained blue accent (Swiss-poster influenced) | Teal (ID-security-strip accent), Indigo (cooler/formal), Marigold (warm stone + gold) |
+| Typography | **Geist Sans** (UI text) + **Geist Mono** (data/ids/timestamps) — self-hosted via the official `geist` npm package, no CDN | System-native font stack |
+| Radius | **Sharp** — `--r-xs:2px`, `--r-sm:3px`, `--r-md:4px`, `--r-lg:6px`, `--r-pill:4px` (badges read as small tags, not pills) | Soft (7–14px), Round (9–20px) |
+| Shadow | **Soft** — a subtle 1–2px + diffused 6–20px shadow on cards; the 1px border stays visible alongside it | Flat (border only, no shadow), Elevated (stronger shadow, border dropped) |
+| Density | **Comfortable** — 20px card padding, 20px section gaps, 34px control height, 256px sidebar width, 60px topbar height | Compact, Spacious |
+| Icons | **Bold** stroke weight (~2.2px), line icons throughout (no filled icons, no emoji) | Thin (~1.2px), Regular (~1.6px) |
+| Layout | **Sidebar** (256px) + slim top bar | Top-nav-only (no left rail; primary nav collapses into the top bar) |
+| Sidebar treatment | **Flush** — full-height, edge-to-edge, 1px right border | Floating — inset with margin, rounded, own shadow |
+| Surface | **Bordered** cards — 1px border + soft shadow | Borderless — sections separated by a hairline only, no card chrome |
+| Accent intensity | **Bold** — primary actions get a filled accent background; accent also drives the active-nav-item tint and focus rings | Restrained — primary actions are ink-on-paper, accent reserved for a thin active-nav indicator, links, and focus rings |
+| Content width | **Comfortable** — content column caps around 900px | Wide (~1120px), Full-bleed |
+
+Color tokens (semantic, theme-scoped — mirrors shadcn/ui's own variable naming so it maps
+directly onto `tailwind.config`/`globals.css` when implemented):
+
+| Token | Light | Dark |
+|---|---|---|
+| `--bg` | `#FAFAF9` | `#0D0D0C` |
+| `--bg-elevated` (cards) | `#FFFFFF` | `#171716` |
+| `--bg-sidebar` | `#F0F0EE` | `#050505` |
+| `--text` | `#101010` | `#F2F2EF` |
+| `--text-muted` | `#6E6E6C` | `#9A9A96` |
+| `--border` | `#DEDEDA` | `#2C2C29` |
+| `--accent` | `#1F4FD6` | `#6E93FF` |
+| `--accent-contrast` | `#FFFFFF` | `#0A1230` |
+| `--success` | `#1F8A4C` | `#45BE7B` |
+| `--warning` | `#A6740A` | `#DDA53E` |
+| `--danger` | `#B0281E` | `#E2564A` |
+
+Semantic colors (`success`/`warning`/`danger`) are a distinct hue family from `--accent` on
+purpose — a status pill and a primary button must never be visually confusable.
+
+### 5.2 Implementation
+
 - Tailwind CSS for layout/utility styling.
 - shadcn/ui components, generated into `src/components/`, then customized in place — treated
   as owned source, not a dependency to upgrade.
@@ -89,7 +132,9 @@ mirroring how CODING_STANDARDS.md preceded `server/` implementation (CODING_STAN
   `tenant`) is applied via **CSS custom properties set at runtime** from the fetched tenant
   config (resolved by origin, TECHNICAL_DESIGN.md §3.3), not baked in at build time — one
   build serves every tenant. Tailwind utilities reference these variables (e.g.
-  `bg-[var(--tenant-accent)]`) rather than each tenant needing its own build.
+  `bg-[var(--tenant-accent)]`) rather than each tenant needing its own build. A tenant's own
+  accent color overrides `--accent` specifically; the rest of §5.1's tokens are instance-wide,
+  not per-tenant.
 
 ## 6. Routing & Code Splitting
 
