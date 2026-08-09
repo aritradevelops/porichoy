@@ -142,4 +142,10 @@
   body {
     @apply bg-background text-foreground font-sans;
   }
+  /* Icons: Bold stroke weight (~2.2px), line icons throughout
+     (UI_CODING_STANDARDS.md §5.1) — set once here rather than passing
+     strokeWidth to every lucide-react icon call site. */
+  svg {
+    stroke-width: 2.2;
+  }
 }

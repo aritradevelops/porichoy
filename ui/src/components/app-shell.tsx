@@ -1,0 +1,234 @@
+import { useState } from 'react'
+import {
+  Building2Icon,
+  ChevronRightIcon,
+  ChevronsUpDownIcon,
+  FileClockIcon,
+  HomeIcon,
+  KeyRoundIcon,
+  LayoutDashboardIcon,
+  LayoutGridIcon,
+  LogOutIcon,
+  ScrollTextIcon,
+  ShieldCheckIcon,
+  ShieldIcon,
+  UserIcon,
+  UsersRoundIcon,
+  type LucideIcon,
+} from 'lucide-react'
+import { NavLink, Outlet, useLocation } from 'react-router-dom'
+import { cn } from '@/lib/utils'
+import { Avatar, AvatarFallback } from '@/components/ui/avatar'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
+import { ThemeToggle } from '@/components/theme-toggle'
+
+interface NavItem {
+  to: string
+  label: string
+  icon: LucideIcon
+  end?: boolean
+}
+
+// User section (ungrouped, top) — visible to every logged-in user regardless
+// of permissions (UI_PAGES.md §0), so unlike the Administration items below,
+// these don't need a future permission-gate comment.
+const userNavItems: NavItem[] = [
+  { to: '/', label: 'Home', icon: HomeIcon, end: true },
+  { to: '/profile', label: 'Profile', icon: UserIcon },
+  { to: '/security', label: 'Security', icon: ShieldCheckIcon },
+]
+
+// Administration group (UI_PAGES.md §0). Each item shown unconditionally here
+// for layout purposes — it should only render for a user actually holding the
+// corresponding admin permission once lib/client exists to check that
+// (TECHNICAL_DESIGN §1's permission-gated-visibility model, AUTHORIZATION_MODEL
+// §2's {module}:{action}@{scope} grants).
+const adminNavItems: NavItem[] = [
+  // Gate on a dashboard/metrics-read permission once lib/client exists.
+  { to: '/admin', label: 'Dashboard', icon: LayoutDashboardIcon, end: true },
+  // Gate on a tenant-read permission once lib/client exists.
+  { to: '/admin/tenants', label: 'Tenants', icon: Building2Icon },
+  // Gate on an app-read permission once lib/client exists.
+  { to: '/admin/apps', label: 'Apps', icon: LayoutGridIcon },
+]
+
+// Access Control's static sub-list (UI_PAGES.md §7) — each item gates on its
+// own permission once lib/client exists, same as the top-level admin items.
+const accessControlSubItems: NavItem[] = [
+  // Gate on a role-read permission once lib/client exists.
+  { to: '/admin/access-control/roles', label: 'Roles', icon: UsersRoundIcon },
+  // Gate on a permission-read permission once lib/client exists.
+  {
+    to: '/admin/access-control/permissions',
+    label: 'Permissions',
+    icon: KeyRoundIcon,
+  },
+  // Gate on a policy-read permission once lib/client exists.
+  { to: '/admin/access-control/policies', label: 'Policies', icon: ScrollTextIcon },
+]
+
+// Gate on an audit-log-read permission once lib/client exists.
+const auditLogsItem: NavItem = {
+  to: '/admin/audit-logs',
+  label: 'Audit Logs',
+  icon: FileClockIcon,
+}
+
+function navLinkClassName({ isActive }: { isActive: boolean }) {
+  return cn(
+    'flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition-colors',
+    isActive
+      ? 'bg-sidebar-primary text-sidebar-primary-foreground'
+      : 'text-sidebar-foreground hover:bg-sidebar-accent',
+  )
+}
+
+// Sidebar (256px) + slim top bar, sidebar treatment: Flush — full-height,
+// edge-to-edge, 1px right border (UI_CODING_STANDARDS.md §5.1).
+export function AppShell() {
+  const { pathname } = useLocation()
+  const accessControlActive = pathname.startsWith('/admin/access-control')
+  const [accessControlOpen, setAccessControlOpen] = useState(accessControlActive)
+
+  return (
+    <div className="bg-background flex min-h-svh">
+      <aside className="bg-sidebar border-sidebar-border flex w-(--sidebar-width) shrink-0 flex-col border-r">
+        {/* Org switcher placeholder — will list the user's actual organizations
+            once lib/client exists (USER_JOURNEYS_ORGANIZATIONS.md §3). */}
+        <div className="border-sidebar-border flex h-(--topbar-height) items-center border-b px-4">
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                type="button"
+                className="hover:bg-sidebar-accent flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors"
+              >
+                <div className="bg-primary text-primary-foreground flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-xs font-semibold">
+                  P
+                </div>
+                <span className="text-sidebar-foreground flex-1 truncate text-sm font-medium">
+                  Acme Corp
+                </span>
+                <ChevronsUpDownIcon className="text-muted-foreground size-4 shrink-0" />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start" className="w-56">
+              <DropdownMenuItem>Acme Corp</DropdownMenuItem>
+              <DropdownMenuItem>Beta Inc</DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem>Create organization</DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+
+        <nav className="flex flex-1 flex-col gap-1 overflow-y-auto p-3">
+          {userNavItems.map(({ to, label, icon: Icon, end }) => (
+            <NavLink key={to} to={to} end={end} className={navLinkClassName}>
+              <Icon className="size-4" />
+              {label}
+            </NavLink>
+          ))}
+
+          <div className="text-muted-foreground px-3 pt-4 pb-1 text-[11px] font-semibold tracking-[0.08em] uppercase">
+            Administration
+          </div>
+
+          {adminNavItems.map(({ to, label, icon: Icon, end }) => (
+            <NavLink key={to} to={to} end={end} className={navLinkClassName}>
+              <Icon className="size-4" />
+              {label}
+            </NavLink>
+          ))}
+
+          <button
+            type="button"
+            onClick={() => setAccessControlOpen((open) => !open)}
+            aria-expanded={accessControlOpen}
+            className={cn(
+              'flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm font-medium transition-colors',
+              accessControlActive
+                ? 'bg-sidebar-primary text-sidebar-primary-foreground'
+                : 'text-sidebar-foreground hover:bg-sidebar-accent',
+            )}
+          >
+            <ShieldIcon className="size-4" />
+            <span className="flex-1">Access Control</span>
+            <ChevronRightIcon
+              className={cn(
+                'size-4 shrink-0 transition-transform duration-150',
+                accessControlOpen && 'rotate-90',
+              )}
+            />
+          </button>
+          {accessControlOpen && (
+            <div className="flex flex-col gap-1 pl-6">
+              {accessControlSubItems.map(({ to, label, icon: Icon }) => (
+                <NavLink key={to} to={to} className={navLinkClassName}>
+                  <Icon className="size-4" />
+                  {label}
+                </NavLink>
+              ))}
+            </div>
+          )}
+
+          <NavLink to={auditLogsItem.to} className={navLinkClassName}>
+            <auditLogsItem.icon className="size-4" />
+            {auditLogsItem.label}
+          </NavLink>
+        </nav>
+
+        {/* User menu placeholder — will show the authenticated user's real
+            name/email once lib/client exists. */}
+        <div className="border-sidebar-border border-t p-3">
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                type="button"
+                className="hover:bg-sidebar-accent flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors"
+              >
+                <Avatar className="size-7">
+                  <AvatarFallback className="text-xs">JD</AvatarFallback>
+                </Avatar>
+                <div className="flex-1 truncate">
+                  <p className="text-sidebar-foreground truncate text-sm font-medium">
+                    Jane Doe
+                  </p>
+                  <p className="text-muted-foreground truncate text-xs">
+                    jane@example.com
+                  </p>
+                </div>
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start" className="w-56">
+              <DropdownMenuItem asChild>
+                <NavLink to="/profile">
+                  <UserIcon /> Profile
+                </NavLink>
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem variant="destructive">
+                <LogOutIcon /> Sign out
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+      </aside>
+
+      <div className="flex flex-1 flex-col">
+        <header className="border-border flex h-(--topbar-height) shrink-0 items-center justify-end border-b px-6">
+          <ThemeToggle />
+        </header>
+        <main className="flex-1 overflow-y-auto p-8">
+          <div className="mx-auto max-w-(--content-max-width)">
+            <Outlet />
+          </div>
+        </main>
+      </div>
+    </div>
+  )
+}
