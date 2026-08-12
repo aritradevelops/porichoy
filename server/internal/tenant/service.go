@@ -2,6 +2,7 @@ package tenant
 
 import (
 	"context"
+"net/http"
 	"time"
 
 	"github.com/aritradevelops/porichoy/server/internal/actor"
@@ -100,7 +101,7 @@ func (s *Service) RegisterDomain(ctx context.Context, act actor.Actor, tenantID 
 		return nil, err
 	}
 	if existing != nil {
-		return nil, apperror.New("tenant.domain_already_registered")
+		return nil, apperror.New("tenant.domain_already_registered", http.StatusConflict)
 	}
 
 	d := &TenantDomain{
@@ -134,7 +135,7 @@ func (s *Service) ConfigureTenant(ctx context.Context, act actor.Actor, tenantID
 		return nil, err
 	}
 	if t == nil {
-		return nil, apperror.New("tenant.not_found")
+		return nil, apperror.New("tenant.not_found", http.StatusNotFound)
 	}
 
 	if cfg.LogoURL != nil {

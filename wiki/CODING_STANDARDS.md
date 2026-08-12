@@ -112,7 +112,7 @@ any of these.
   string, even though nothing enforces this at the database layer (DATA_MODEL.md §0 already
   established the DB itself doesn't constrain these).
 - **`role.policies` is `json.RawMessage`**, not `map[string]any` or a custom struct.
-  Porichoy never interprets policy content (PRD §7.1, DATA_MODEL.md `role`) — keeping it as
+  Porichoy never interprets policy content (PRD §7.1, DATA_MODEL.md `roles`) — keeping it as
   opaque raw bytes enforces that at the type level; there's no accidental temptation to
   introspect fields that aren't ours to interpret.
 - **Packages are grouped by bounded context, not one-per-table.** DATA_MODEL.md's own
@@ -128,9 +128,9 @@ any of these.
   | `internal/authorization` | Role, RoleAssignment, APICredential |
   | `internal/audit` | AuditLog |
 
-  `session` sits under `app` (matching DATA_MODEL.md §2) even though it's arguably an
+  `sessions` sits under `app` (matching DATA_MODEL.md §2) even though it's arguably an
   identity concern — following the doc's existing grouping for consistency rather than
-  re-deriving a boundary. `api_credential` sits under `authorization`, consistent with it
+  re-deriving a boundary. `api_credentials` sits under `authorization`, consistent with it
   being a principal that holds role assignments the same way a user does (DATA_MODEL.md §0).
   Flagging both as judgment calls, not asked-for specifics.
 - **Cross-entity references are always by ID, never by embedded struct pointer.** A `Role`
@@ -239,7 +239,32 @@ resolved from a translation file at response time (based on requested locale —
 > **Open — exact locale-resolution mechanics** (which header, fallback locale, where
 > translation files live in the repo) not decided yet.
 
-## 9. Build Order
+## 9. Postgres Adapter
+
+- **One repository struct per interface, in `internal/adapters/postgres`** — e.g.
+  `TenantRepository` implements `tenant.Repository`. Each file also declares a compile-time
+  check (`var _ tenant.Repository = (*TenantRepository)(nil)`) so an interface drift is a
+  build failure, not a runtime surprise.
+- **Explicit soft delete, not Bun's built-in soft-delete feature.** Bun can auto-manage a
+  `deleted_at`-tagged field, but that only covers one column — this schema always pairs
+  `deleted_at` with `deleted_by` (DATA_MODEL.md §0), so `SoftDelete` methods hand-write the
+  `UPDATE ... SET deleted_at = ?, deleted_by = ?` themselves, and every read query hand-adds
+  `WHERE deleted_at IS NULL`. Consistent with this codebase's general preference for explicit
+  code over framework magic (§2 — manual DI, no codegen).
+- **Migrations are goose SQL files, timestamp-named** (`goose create`'s default format,
+  `YYYYMMDDHHMMSS_description.sql`), one file per bounded-context's initial table batch —
+  e.g. `tenants`, `domain_registries`, and `tenant_provider_credentials`
+  (`internal/tenant`'s three tables) ship together in one migration, not three.
+- **Table names are always plural**, Go entity/package names always singular (e.g. `tenants`
+  the table, but `Tenant`/`internal/tenant` the Go type and package) — the standard
+  ORM-adjacent convention (a row is one `Tenant`; the table holding many of them is
+  `tenants`).
+- **Integration tests share one `TestMain`-managed container per package**, not one per test
+  function — still "hermetic, per-test-run" per §6, just scoped to the test binary rather
+  than each individual test case, since spinning a fresh Postgres per test is unnecessary
+  overhead here.
+
+## 10. Build Order
 
 Initial implementation order: **entities and repository interfaces first, then each
 context's `Service`, before wiring up any HTTP handler, Postgres adapter, or auth flow** —
@@ -247,7 +272,7 @@ per the grouped packages in §4. Each bounded-context package is established as 
 directly testable unit before anything adapter-level is built on top of it, even though
 nothing is runnable end-to-end until the adapters follow.
 
-## 10. Scaffold History
+## 11. Scaffold History
 
 `server/internal/ports/` (created early on, holding nothing but empty per-concern
 directories) was removed once §2 was decided — port interfaces live with their entities,

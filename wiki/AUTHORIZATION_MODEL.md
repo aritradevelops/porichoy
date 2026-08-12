@@ -77,6 +77,15 @@ depending on the resource.
   `root`. At `app` scope, it's excluded outright — an app-level admin (someone scoped to a
   single specific app) can never see the system app, even incidentally. Only tenant admins
   and root admins can.
+- **`tenant` module**: exact-match rather than the default `tenant_id = :tenant_id` (a
+  `Tenant` row's own `id` *is* the tenant, there's no `tenant_id` foreign key on itself to
+  filter by). Below `root` scope, a caller may only fetch (`GetByID`) or list the children
+  of (`ListChildren`) their own `act.TenantID` — never a sibling or a descendant, even
+  though tenants form an arbitrary-depth tree (PRD §4). A scope mismatch returns "not
+  found" rather than a forbidden error, consistent with this module's existing
+  `FindByID`/`RegisterDomain` convention of not letting a caller distinguish "doesn't
+  exist" from "exists but isn't yours." Resolves the open question in
+  USER_JOURNEYS_ADMIN_TENANT_MANAGEMENT.md §8.
 
 Additional modules will define their own mappings as they're built; this table is expected
 to grow, not be exhaustive from day one.

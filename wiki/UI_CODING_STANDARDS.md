@@ -129,7 +129,7 @@ purpose — a status pill and a primary button must never be visually confusable
 - shadcn/ui components, generated into `src/components/`, then customized in place — treated
   as owned source, not a dependency to upgrade.
 - Per-tenant branding (logo, brand image, login layout, accent colors — DATA_MODEL.md
-  `tenant`) is applied via **CSS custom properties set at runtime** from the fetched tenant
+  `tenants`) is applied via **CSS custom properties set at runtime** from the fetched tenant
   config (resolved by origin, TECHNICAL_DESIGN.md §3.3), not baked in at build time — one
   build serves every tenant. Tailwind utilities reference these variables (e.g.
   `bg-[var(--tenant-accent)]`) rather than each tenant needing its own build. A tenant's own

@@ -104,8 +104,8 @@ conventions, and how the i18n error-message pattern actually works.
 | `MFAMethod` | Per-user, supports multiple enrolled methods (TOTP, WebAuthn, etc.) per PRD §9.2. |
 | `Organization` | End-customer company, scoped to a tenant, shared across all apps under that tenant. |
 | `OrgMembership` | User ↔ Organization, supports multi-org membership. |
-| `Role` | App-scoped (individual sign-up apps) or org-scoped (organization-enabled apps), per PRD §7.2. Permissions (string identifiers, `{module}:{action}@{scope}`) and policies (opaque JSON, client-app-interpreted) are embedded directly as arrays on the role — not separate entities — to avoid join fan-out on the frequent path of editing a role's grants (DATA_MODEL.md `role`). |
-| `RoleAssignment` | Binds `{principal, role}` — a principal is a user *or* an API credential, undifferentiated (DATA_MODEL.md §0); resources can be created/modified/deleted via API credentials exactly as by a logged-in user. Scope isn't stored here, it lives on each permission string within the role itself. The one exception is an optional org reference, needed only to disambiguate a shared/base role reused across multiple orgs (DATA_MODEL.md `role_assignment`). |
+| `Role` | App-scoped (individual sign-up apps) or org-scoped (organization-enabled apps), per PRD §7.2. Permissions (string identifiers, `{module}:{action}@{scope}`) and policies (opaque JSON, client-app-interpreted) are embedded directly as arrays on the role — not separate entities — to avoid join fan-out on the frequent path of editing a role's grants (DATA_MODEL.md `roles`). |
+| `RoleAssignment` | Binds `{principal, role}` — a principal is a user *or* an API credential, undifferentiated (DATA_MODEL.md §0); resources can be created/modified/deleted via API credentials exactly as by a logged-in user. Scope isn't stored here, it lives on each permission string within the role itself. The one exception is an optional org reference, needed only to disambiguate a shared/base role reused across multiple orgs (DATA_MODEL.md `role_assignments`). |
 | `Session` | Source of truth in Postgres; backs the "view/revoke active sessions" self-service feature (PRD §9.4) and admin-triggered revocation. |
 | `AuditLog` | Every API call (PRD §11); written via a pluggable log-sink port (§8 below), default Postgres, swappable for an external sink. |
 
@@ -182,7 +182,7 @@ non-visibility to app-scoped admins is actually enforced at the query-filter lev
 - **Password reuse**: on change, the new password is hashed and checked against the user's
   last 4 `Password` rows (active + soft-deleted, by `created_at`) — a match is rejected. On
   success, the current row is soft-deleted (`deleted_at`/`deleted_by`) and a new active row
-  is inserted; nothing is hard-deleted or pruned (DATA_MODEL.md `password`).
+  is inserted; nothing is hard-deleted or pruned (DATA_MODEL.md `passwords`).
 - **WebAuthn**: supports both passwordless primary login and use as an MFA factor, chosen
   per tenant/user configuration — consistent with the multi-method model in PRD §5.1.
 - **TOTP secrets**: encrypted at rest using a single instance-wide encryption key (KMS-backed
@@ -209,7 +209,7 @@ non-visibility to app-scoped admins is actually enforced at the query-filter lev
   or freeform their authorization model is. Porichoy does not interpret policy content;
   it stores and returns it via the runtime permissions API for the client app to evaluate.
   Both are embedded as arrays directly on the role row, not normalized child tables
-  (DATA_MODEL.md `role`) — deliberate, to keep role edits (the frequent operation) a
+  (DATA_MODEL.md `roles`) — deliberate, to keep role edits (the frequent operation) a
   single-row update.
 - **Route convention, scope resolution, and query filtering**: see
   [AUTHORIZATION_MODEL.md](./AUTHORIZATION_MODEL.md) for how routes map to

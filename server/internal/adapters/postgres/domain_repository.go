@@ -1,0 +1,124 @@
+package postgres
+
+import (
+	"context"
+	"database/sql"
+	"errors"
+	"time"
+
+	"github.com/aritradevelops/porichoy/server/internal/actor"
+	"github.com/aritradevelops/porichoy/server/internal/tenant"
+	"github.com/google/uuid"
+	"github.com/uptrace/bun"
+)
+
+// domainModel is Bun's mapping of the domain_registry table (DATA_MODEL.md
+// `domain_registry`) — kept separate from tenant.TenantDomain (CODING_STANDARDS.md §2).
+type domainModel struct {
+	bun.BaseModel `bun:"table:domain_registries,alias:dr"`
+
+	ID       uuid.UUID `bun:"id,pk,type:uuid"`
+	TenantID uuid.UUID `bun:"tenant_id,type:uuid"`
+	Domain   string    `bun:"domain"`
+
+	CreatedAt time.Time  `bun:"created_at"`
+	CreatedBy *uuid.UUID `bun:"created_by,type:uuid"`
+
+	DeletedAt *time.Time `bun:"deleted_at"`
+	DeletedBy *uuid.UUID `bun:"deleted_by,type:uuid"`
+}
+
+func domainFromModel(m *domainModel) *tenant.TenantDomain {
+	return &tenant.TenantDomain{
+		ID:        m.ID,
+		TenantID:  m.TenantID,
+		Domain:    m.Domain,
+		CreatedAt: m.CreatedAt,
+		CreatedBy: m.CreatedBy,
+		DeletedAt: m.DeletedAt,
+		DeletedBy: m.DeletedBy,
+	}
+}
+
+func domainToModel(d *tenant.TenantDomain) *domainModel {
+	return &domainModel{
+		ID:        d.ID,
+		TenantID:  d.TenantID,
+		Domain:    d.Domain,
+		CreatedAt: d.CreatedAt,
+		CreatedBy: d.CreatedBy,
+		DeletedAt: d.DeletedAt,
+		DeletedBy: d.DeletedBy,
+	}
+}
+
+// DomainRepository implements tenant.DomainRepository using Postgres via Bun.
+type DomainRepository struct {
+	db *bun.DB
+}
+
+// NewDomainRepository builds a DomainRepository from an open Bun connection.
+func NewDomainRepository(db *bun.DB) *DomainRepository {
+	return &DomainRepository{db: db}
+}
+
+var _ tenant.DomainRepository = (*DomainRepository)(nil)
+
+// Create persists d. d already carries CreatedBy (set by tenant.Service), so no actor.Actor
+// is needed here (CODING_STANDARDS.md §4). The domain's uniqueness (among active rows) is
+// enforced by a partial unique index, not application code — a violation surfaces as a
+// plain Postgres error here; tenant.Service.RegisterDomain's own FindByDomain check exists
+// to turn that into a clean apperror.Error before this call is even made.
+func (r *DomainRepository) Create(ctx context.Context, d *tenant.TenantDomain) error {
+	_, err := r.db.NewInsert().Model(domainToModel(d)).Exec(ctx)
+	return err
+}
+
+// FindByDomain resolves the tenant a given origin belongs to (tenant.DomainRepository) — a
+// global, unique-key lookup with no actor.Actor, ever (CODING_STANDARDS.md §4): it backs
+// both the pre-authentication tenant-resolution path and the uniqueness check inside the
+// authorized RegisterDomain flow, and domain uniqueness is instance-wide, never scoped.
+func (r *DomainRepository) FindByDomain(ctx context.Context, domain string) (*tenant.TenantDomain, error) {
+	m := new(domainModel)
+	err := r.db.NewSelect().Model(m).
+		Where("domain = ?", domain).
+		Where("deleted_at IS NULL").
+		Scan(ctx)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return domainFromModel(m), nil
+}
+
+// ListByTenant lists tenantID's registered domains (tenant.DomainRepository).
+func (r *DomainRepository) ListByTenant(ctx context.Context, act actor.Actor, tenantID uuid.UUID) ([]*tenant.TenantDomain, error) {
+	_ = act
+	var models []*domainModel
+	if err := r.db.NewSelect().Model(&models).
+		Where("tenant_id = ?", tenantID).
+		Where("deleted_at IS NULL").
+		Scan(ctx); err != nil {
+		return nil, err
+	}
+	result := make([]*tenant.TenantDomain, len(models))
+	for i, m := range models {
+		result[i] = domainFromModel(m)
+	}
+	return result, nil
+}
+
+// SoftDelete unregisters id, freeing its domain value for reuse (the partial unique index
+// on domain_registry only covers non-deleted rows, per the migration's own comment).
+func (r *DomainRepository) SoftDelete(ctx context.Context, act actor.Actor, id uuid.UUID) error {
+	_, err := r.db.NewUpdate().
+		Model((*domainModel)(nil)).
+		Set("deleted_at = ?", time.Now()).
+		Set("deleted_by = ?", act.PrincipalID).
+		Where("id = ?", id).
+		Where("deleted_at IS NULL").
+		Exec(ctx)
+	return err
+}

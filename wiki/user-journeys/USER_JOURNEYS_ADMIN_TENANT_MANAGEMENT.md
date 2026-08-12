@@ -169,6 +169,11 @@ Deliberately out of this first pass — likely their own journeys later:
 
 ## 8. Open Items
 
-1. **Tenant Admin's scope breadth** (§2) — working assumption is broadly root-scoped (any
-   child tenant), not tied to a specific tenant per assignment. Flagged there in detail;
-   not fully confirmed.
+1. ~~**Tenant Admin's scope breadth** (§2)~~ — **Resolved, differently from this doc's
+   prior working assumption.** AUTHORIZATION_MODEL.md §4 now defines the `tenant` module's
+   scope→filter mapping as exact-match: below `root` scope, a caller can only act on their
+   own `act.TenantID`, not any child tenant. This doc's "working assumption" above had
+   guessed the opposite (broadly root-like, any child tenant) — that guess didn't hold when
+   the REST adapter forced the decision. If broader child-tenant management turns out to be
+   a real requirement, it'll need its own explicit scope/permission (not just "tenant"
+   scope reinterpreted), not a reversal of this mapping.
