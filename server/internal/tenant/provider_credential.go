@@ -45,8 +45,12 @@ func (c *ProviderCredential) IsDeleted() bool {
 
 // ProviderCredentialRepository persists and retrieves ProviderCredentials.
 type ProviderCredentialRepository interface {
-	// Upsert creates or replaces the credential for c's (TenantID, ProviderType) pair.
-	Upsert(ctx context.Context, c *ProviderCredential) error
+	// Upsert creates or replaces the credential for c's (TenantID, ProviderType) pair,
+	// after checking act is authorized against c.TenantID (AUTHORIZATION_MODEL.md §4: root
+	// may write for any tenant; tenant scope only for itself or a descendant), returning
+	// tenant.ErrTenantNotFound otherwise. c already carries CreatedBy/UpdatedBy (set by
+	// tenant.Service), but act is still needed for this authorization check.
+	Upsert(ctx context.Context, act actor.Actor, c *ProviderCredential) error
 	FindByTenantAndType(ctx context.Context, act actor.Actor, tenantID uuid.UUID, providerType ProviderType) (*ProviderCredential, error)
 	ListByTenant(ctx context.Context, act actor.Actor, tenantID uuid.UUID) ([]*ProviderCredential, error)
 	SoftDelete(ctx context.Context, act actor.Actor, id uuid.UUID) error

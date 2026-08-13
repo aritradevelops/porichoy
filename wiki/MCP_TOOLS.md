@@ -36,7 +36,7 @@ needs, rather than one rigid scripted tool with a fixed question order.
 
 ## 3. Authentication Ordering (Chicken-and-Egg)
 
-MCP calls authenticate via `api_credential` keys (TECHNICAL_DESIGN §7) — but the very first
+MCP calls authenticate via `api_credentials` keys (TECHNICAL_DESIGN §7) — but the very first
 bootstrap step (creating the root tenant itself, USER_JOURNEYS_ADMIN_TENANT_MANAGEMENT.md
 §1) happens before any tenant, user, or API credential exists at all. So:
 
@@ -95,7 +95,7 @@ specified, so a minimal call only needs `name` and `supports_organizations`.
 
 ### `role_create`
 Maps to §5. Since permissions/policies are embedded arrays, not separate objects
-(DATA_MODEL.md `role`), this one call is the entire "define a role" step — no separate
+(DATA_MODEL.md `roles`), this one call is the entire "define a role" step — no separate
 "create permission" tool exists.
 - **Input**: `app_id`, `org_id` (optional, for an org-specific customization),
   `name`, `permissions` (array of strings), `policies` (array of objects, optional),

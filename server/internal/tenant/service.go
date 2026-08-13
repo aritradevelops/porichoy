@@ -2,6 +2,8 @@ package tenant
 
 import (
 	"context"
+	"errors"
+	"net/http"
 	"time"
 
 	"github.com/aritradevelops/porichoy/server/internal/actor"
@@ -39,7 +41,7 @@ func (s *Service) CreateRootTenant(ctx context.Context, name string) (*Tenant, e
 		CreatedAt:   now,
 		UpdatedAt:   now,
 	}
-	if err := s.tenants.Create(ctx, t); err != nil {
+	if err := s.tenants.CreateRoot(ctx, t); err != nil {
 		return nil, err
 	}
 	return t, nil
@@ -64,7 +66,10 @@ func (s *Service) CreateTenant(ctx context.Context, act actor.Actor, name string
 		CreatedBy:   &act.PrincipalID,
 		UpdatedBy:   &act.PrincipalID,
 	}
-	if err := s.tenants.Create(ctx, t); err != nil {
+	if err := s.tenants.Create(ctx, act, t); err != nil {
+		if errors.Is(err, ErrTenantNotFound) {
+			return nil, apperror.New("tenant.not_found", http.StatusNotFound)
+		}
 		return nil, err
 	}
 	return t, nil
@@ -100,7 +105,7 @@ func (s *Service) RegisterDomain(ctx context.Context, act actor.Actor, tenantID 
 		return nil, err
 	}
 	if existing != nil {
-		return nil, apperror.New("tenant.domain_already_registered")
+		return nil, apperror.New("tenant.domain_already_registered", http.StatusConflict)
 	}
 
 	d := &TenantDomain{
@@ -110,7 +115,10 @@ func (s *Service) RegisterDomain(ctx context.Context, act actor.Actor, tenantID 
 		CreatedAt: time.Now(),
 		CreatedBy: &act.PrincipalID,
 	}
-	if err := s.domains.Create(ctx, d); err != nil {
+	if err := s.domains.Create(ctx, act, d); err != nil {
+		if errors.Is(err, ErrTenantNotFound) {
+			return nil, apperror.New("tenant.not_found", http.StatusNotFound)
+		}
 		return nil, err
 	}
 	return d, nil
@@ -134,7 +142,7 @@ func (s *Service) ConfigureTenant(ctx context.Context, act actor.Actor, tenantID
 		return nil, err
 	}
 	if t == nil {
-		return nil, apperror.New("tenant.not_found")
+		return nil, apperror.New("tenant.not_found", http.StatusNotFound)
 	}
 
 	if cfg.LogoURL != nil {
@@ -189,7 +197,10 @@ func (s *Service) SetProviderCredential(
 		existing.ConfigEncrypted = configEncrypted
 		existing.UpdatedAt = now
 		existing.UpdatedBy = &act.PrincipalID
-		if err := s.creds.Upsert(ctx, existing); err != nil {
+		if err := s.creds.Upsert(ctx, act, existing); err != nil {
+			if errors.Is(err, ErrTenantNotFound) {
+				return nil, apperror.New("tenant.not_found", http.StatusNotFound)
+			}
 			return nil, err
 		}
 		return existing, nil
@@ -205,7 +216,10 @@ func (s *Service) SetProviderCredential(
 		CreatedBy:       &act.PrincipalID,
 		UpdatedBy:       &act.PrincipalID,
 	}
-	if err := s.creds.Upsert(ctx, c); err != nil {
+	if err := s.creds.Upsert(ctx, act, c); err != nil {
+		if errors.Is(err, ErrTenantNotFound) {
+			return nil, apperror.New("tenant.not_found", http.StatusNotFound)
+		}
 		return nil, err
 	}
 	return c, nil
