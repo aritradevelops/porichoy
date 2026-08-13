@@ -17,8 +17,12 @@ import (
 
 type mockTenantRepo struct{ mock.Mock }
 
-func (m *mockTenantRepo) Create(ctx context.Context, t *tenant.Tenant) error {
+func (m *mockTenantRepo) CreateRoot(ctx context.Context, t *tenant.Tenant) error {
 	return m.Called(ctx, t).Error(0)
+}
+
+func (m *mockTenantRepo) Create(ctx context.Context, act actor.Actor, t *tenant.Tenant) error {
+	return m.Called(ctx, act, t).Error(0)
 }
 
 func (m *mockTenantRepo) FindByID(ctx context.Context, id uuid.UUID) (*tenant.Tenant, error) {
@@ -49,8 +53,8 @@ func (m *mockTenantRepo) ListChildren(ctx context.Context, act actor.Actor, pare
 
 type mockDomainRepo struct{ mock.Mock }
 
-func (m *mockDomainRepo) Create(ctx context.Context, d *tenant.TenantDomain) error {
-	return m.Called(ctx, d).Error(0)
+func (m *mockDomainRepo) Create(ctx context.Context, act actor.Actor, d *tenant.TenantDomain) error {
+	return m.Called(ctx, act, d).Error(0)
 }
 
 func (m *mockDomainRepo) FindByDomain(ctx context.Context, domain string) (*tenant.TenantDomain, error) {
@@ -71,8 +75,8 @@ func (m *mockDomainRepo) SoftDelete(ctx context.Context, act actor.Actor, id uui
 
 type mockCredentialRepo struct{ mock.Mock }
 
-func (m *mockCredentialRepo) Upsert(ctx context.Context, c *tenant.ProviderCredential) error {
-	return m.Called(ctx, c).Error(0)
+func (m *mockCredentialRepo) Upsert(ctx context.Context, act actor.Actor, c *tenant.ProviderCredential) error {
+	return m.Called(ctx, act, c).Error(0)
 }
 
 func (m *mockCredentialRepo) FindByTenantAndType(ctx context.Context, act actor.Actor, tenantID uuid.UUID, providerType tenant.ProviderType) (*tenant.ProviderCredential, error) {

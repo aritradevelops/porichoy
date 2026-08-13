@@ -169,11 +169,15 @@ Deliberately out of this first pass — likely their own journeys later:
 
 ## 8. Open Items
 
-1. ~~**Tenant Admin's scope breadth** (§2)~~ — **Resolved, differently from this doc's
-   prior working assumption.** AUTHORIZATION_MODEL.md §4 now defines the `tenant` module's
-   scope→filter mapping as exact-match: below `root` scope, a caller can only act on their
-   own `act.TenantID`, not any child tenant. This doc's "working assumption" above had
-   guessed the opposite (broadly root-like, any child tenant) — that guess didn't hold when
-   the REST adapter forced the decision. If broader child-tenant management turns out to be
-   a real requirement, it'll need its own explicit scope/permission (not just "tenant"
-   scope reinterpreted), not a reversal of this mapping.
+1. ~~**Tenant Admin's scope breadth** (§2)~~ — **Resolved a second time, reverting the
+   first resolution.** This doc's original "working assumption" (broadly root-like — a
+   tenant admin can reach any descendant tenant, not just their own) was, in fact, correct.
+   An earlier pass at this item resolved it as exact-match instead (below `root` scope, a
+   caller could only act on their own `act.TenantID`, not even a direct child) — that was
+   the wrong call, made when the REST adapter first forced the decision without this
+   context. AUTHORIZATION_MODEL.md §4 now defines the `tenant` module's scope→filter mapping
+   as descendant-access: below `root` scope, a caller can act on their own `act.TenantID`
+   **or any descendant of it**, via a precomputed `ancestors` array (DATA_MODEL.md
+   `tenants`) — a sibling or an ancestor is still out of reach, but a grandchild the caller
+   didn't directly create is not. Recorded here so the flip-flop is visible rather than
+   silently overwritten a second time.

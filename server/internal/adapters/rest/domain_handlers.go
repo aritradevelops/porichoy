@@ -4,7 +4,6 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/aritradevelops/porichoy/server/internal/actor"
 	"github.com/aritradevelops/porichoy/server/internal/apperror"
 	"github.com/aritradevelops/porichoy/server/internal/tenant"
 	"github.com/gofiber/fiber/v2"
@@ -37,19 +36,14 @@ func toDomainResponse(d *tenant.TenantDomain) domainResponse {
 
 // registerDomainRequest is POST /api/v1/domains/register's body. TenantID is required
 // (tenant.Service.RegisterDomain takes it as an explicit parameter, not implied from the
-// Actor) — Register below enforces it can only ever be the caller's own tenant, short of
-// root scope (the same exact-match philosophy as the tenants module,
-// AUTHORIZATION_MODEL.md §4).
+// Actor) — authorization against it (root: any tenant; tenant scope: itself or a
+// descendant, AUTHORIZATION_MODEL.md §4) happens inside DomainRepository.Create, not here.
 type registerDomainRequest struct {
 	TenantID uuid.UUID `json:"tenant_id" validate:"required"`
 	Domain   string    `json:"domain" validate:"required"`
 }
 
-// Register handles POST /api/v1/domains/register (permission domains:register). Unlike
-// the tenants module's GetByID/ListChildren, tenant.Service.RegisterDomain itself performs
-// no scope check (it trusts its caller) — so this handler is where exact-match enforcement
-// actually happens for this one action, mirroring the repository-layer filter the tenants
-// module uses for reads.
+// Register handles POST /api/v1/domains/register (permission domains:register).
 func (h *DomainHandlers) Register(c *fiber.Ctx) error {
 	var req registerDomainRequest
 	if err := bindAndValidate(c, &req); err != nil {
@@ -57,10 +51,6 @@ func (h *DomainHandlers) Register(c *fiber.Ctx) error {
 	}
 
 	act := actorFromLocals(c)
-	if act.Scope != actor.ScopeRoot && req.TenantID != act.TenantID {
-		return fail(c, apperror.New("domain.forbidden", http.StatusForbidden))
-	}
-
 	d, err := h.svc.RegisterDomain(c.Context(), act, req.TenantID, req.Domain)
 	if err != nil {
 		return fail(c, err)

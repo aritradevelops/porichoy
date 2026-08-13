@@ -64,13 +64,23 @@ func NewDomainRepository(db *bun.DB) *DomainRepository {
 
 var _ tenant.DomainRepository = (*DomainRepository)(nil)
 
-// Create persists d. d already carries CreatedBy (set by tenant.Service), so no actor.Actor
-// is needed here (CODING_STANDARDS.md §4). The domain's uniqueness (among active rows) is
-// enforced by a partial unique index, not application code — a violation surfaces as a
-// plain Postgres error here; tenant.Service.RegisterDomain's own FindByDomain check exists
-// to turn that into a clean apperror.Error before this call is even made.
-func (r *DomainRepository) Create(ctx context.Context, d *tenant.TenantDomain) error {
-	_, err := r.db.NewInsert().Model(domainToModel(d)).Exec(ctx)
+// Create persists d, after checking act is authorized to create a domain for d.TenantID
+// (tenant.DomainRepository) — root may create for any tenant; tenant scope only for itself
+// or a descendant (AUTHORIZATION_MODEL.md §4), via tenantAccessible (scope.go). Returns
+// tenant.ErrTenantNotFound if not, same "not found, not forbidden" framing used throughout
+// this package. The domain's uniqueness (among active rows) is enforced by a partial unique
+// index, not application code — a violation surfaces as a plain Postgres error here;
+// tenant.Service.RegisterDomain's own FindByDomain check exists to turn that into a clean
+// apperror.Error before this call is even made.
+func (r *DomainRepository) Create(ctx context.Context, act actor.Actor, d *tenant.TenantDomain) error {
+	ok, err := tenantAccessible(ctx, r.db, act, d.TenantID)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return tenant.ErrTenantNotFound
+	}
+	_, err = r.db.NewInsert().Model(domainToModel(d)).Exec(ctx)
 	return err
 }
 
@@ -93,9 +103,17 @@ func (r *DomainRepository) FindByDomain(ctx context.Context, domain string) (*te
 	return domainFromModel(m), nil
 }
 
-// ListByTenant lists tenantID's registered domains (tenant.DomainRepository).
+// ListByTenant lists tenantID's registered domains (tenant.DomainRepository), after checking
+// act is authorized against tenantID via tenantAccessible (scope.go) — same descendant-access
+// rule as Create. Returns nil, nil (not an error) if not, matching GetByID's framing.
 func (r *DomainRepository) ListByTenant(ctx context.Context, act actor.Actor, tenantID uuid.UUID) ([]*tenant.TenantDomain, error) {
-	_ = act
+	ok, err := tenantAccessible(ctx, r.db, act, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, nil
+	}
 	var models []*domainModel
 	if err := r.db.NewSelect().Model(&models).
 		Where("tenant_id = ?", tenantID).
@@ -112,8 +130,32 @@ func (r *DomainRepository) ListByTenant(ctx context.Context, act actor.Actor, te
 
 // SoftDelete unregisters id, freeing its domain value for reuse (the partial unique index
 // on domain_registry only covers non-deleted rows, per the migration's own comment).
+// SoftDelete takes only id, not the domain's tenant_id, so it fetches the row first to learn
+// it, then checks act's authorization against that tenant via tenantAccessible (scope.go).
+// A missing row or a denied check both no-op silently (nil error), same framing as
+// TenantRepository.SoftDelete.
 func (r *DomainRepository) SoftDelete(ctx context.Context, act actor.Actor, id uuid.UUID) error {
-	_, err := r.db.NewUpdate().
+	m := new(domainModel)
+	err := r.db.NewSelect().Model(m).
+		Where("id = ?", id).
+		Where("deleted_at IS NULL").
+		Scan(ctx)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+
+	ok, err := tenantAccessible(ctx, r.db, act, m.TenantID)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return nil
+	}
+
+	_, err = r.db.NewUpdate().
 		Model((*domainModel)(nil)).
 		Set("deleted_at = ?", time.Now()).
 		Set("deleted_by = ?", act.PrincipalID).

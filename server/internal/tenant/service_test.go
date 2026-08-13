@@ -13,7 +13,7 @@ import (
 
 func TestService_CreateRootTenant(t *testing.T) {
 	tenants := &mockTenantRepo{}
-	tenants.On("Create", mock.Anything, mock.AnythingOfType("*tenant.Tenant")).Return(nil)
+	tenants.On("CreateRoot", mock.Anything, mock.AnythingOfType("*tenant.Tenant")).Return(nil)
 	svc := NewService(tenants, &mockDomainRepo{}, &mockCredentialRepo{})
 
 	got, err := svc.CreateRootTenant(context.Background(), "Root")
@@ -29,7 +29,7 @@ func TestService_CreateRootTenant(t *testing.T) {
 
 func TestService_CreateTenant(t *testing.T) {
 	tenants := &mockTenantRepo{}
-	tenants.On("Create", mock.Anything, mock.AnythingOfType("*tenant.Tenant")).Return(nil)
+	tenants.On("Create", mock.Anything, mock.Anything, mock.AnythingOfType("*tenant.Tenant")).Return(nil)
 	svc := NewService(tenants, &mockDomainRepo{}, &mockCredentialRepo{})
 
 	act := newActor(t)
@@ -48,7 +48,7 @@ func TestService_CreateTenant(t *testing.T) {
 
 func TestService_CreateTenant_DefaultsParentToActorTenant(t *testing.T) {
 	tenants := &mockTenantRepo{}
-	tenants.On("Create", mock.Anything, mock.AnythingOfType("*tenant.Tenant")).Return(nil)
+	tenants.On("Create", mock.Anything, mock.Anything, mock.AnythingOfType("*tenant.Tenant")).Return(nil)
 	svc := NewService(tenants, &mockDomainRepo{}, &mockCredentialRepo{})
 
 	act := newActor(t)
@@ -57,6 +57,21 @@ func TestService_CreateTenant_DefaultsParentToActorTenant(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, got.ParentID)
 	assert.Equal(t, act.TenantID, *got.ParentID)
+}
+
+func TestService_CreateTenant_ParentNotFound(t *testing.T) {
+	tenants := &mockTenantRepo{}
+	tenants.On("Create", mock.Anything, mock.Anything, mock.AnythingOfType("*tenant.Tenant")).
+		Return(ErrTenantNotFound)
+	svc := NewService(tenants, &mockDomainRepo{}, &mockCredentialRepo{})
+
+	parentID := newUUID(t)
+	_, err := svc.CreateTenant(context.Background(), newActor(t), "Brand A", &parentID)
+
+	require.Error(t, err)
+	var appErr *apperror.Error
+	require.ErrorAs(t, err, &appErr)
+	assert.Equal(t, "tenant.not_found", appErr.Key)
 }
 
 func TestService_RegisterDomain_AlreadyRegistered(t *testing.T) {
@@ -71,13 +86,13 @@ func TestService_RegisterDomain_AlreadyRegistered(t *testing.T) {
 	var appErr *apperror.Error
 	require.ErrorAs(t, err, &appErr)
 	assert.Equal(t, "tenant.domain_already_registered", appErr.Key)
-	domains.AssertNotCalled(t, "Create", mock.Anything, mock.Anything)
+	domains.AssertNotCalled(t, "Create", mock.Anything, mock.Anything, mock.Anything)
 }
 
 func TestService_RegisterDomain_OK(t *testing.T) {
 	domains := &mockDomainRepo{}
 	domains.On("FindByDomain", mock.Anything, "brand-a.example.com").Return(nil, nil)
-	domains.On("Create", mock.Anything, mock.AnythingOfType("*tenant.TenantDomain")).Return(nil)
+	domains.On("Create", mock.Anything, mock.Anything, mock.AnythingOfType("*tenant.TenantDomain")).Return(nil)
 	svc := NewService(&mockTenantRepo{}, domains, &mockCredentialRepo{})
 
 	act := newActor(t)
@@ -88,6 +103,21 @@ func TestService_RegisterDomain_OK(t *testing.T) {
 	assert.Equal(t, tenantID, got.TenantID)
 	assert.Equal(t, "brand-a.example.com", got.Domain)
 	assert.Equal(t, &act.PrincipalID, got.CreatedBy)
+}
+
+func TestService_RegisterDomain_TenantNotFound(t *testing.T) {
+	domains := &mockDomainRepo{}
+	domains.On("FindByDomain", mock.Anything, "brand-a.example.com").Return(nil, nil)
+	domains.On("Create", mock.Anything, mock.Anything, mock.AnythingOfType("*tenant.TenantDomain")).
+		Return(ErrTenantNotFound)
+	svc := NewService(&mockTenantRepo{}, domains, &mockCredentialRepo{})
+
+	_, err := svc.RegisterDomain(context.Background(), newActor(t), uuid.New(), "brand-a.example.com")
+
+	require.Error(t, err)
+	var appErr *apperror.Error
+	require.ErrorAs(t, err, &appErr)
+	assert.Equal(t, "tenant.not_found", appErr.Key)
 }
 
 func TestService_ResolveTenantByDomain_NotFound(t *testing.T) {
@@ -165,7 +195,7 @@ func TestService_SetProviderCredential_CreatesWhenAbsent(t *testing.T) {
 	creds := &mockCredentialRepo{}
 	creds.On("FindByTenantAndType", mock.Anything, mock.Anything, mock.Anything, ProviderTypeGoogle).
 		Return(nil, nil)
-	creds.On("Upsert", mock.Anything, mock.AnythingOfType("*tenant.ProviderCredential")).Return(nil)
+	creds.On("Upsert", mock.Anything, mock.Anything, mock.AnythingOfType("*tenant.ProviderCredential")).Return(nil)
 	svc := NewService(&mockTenantRepo{}, &mockDomainRepo{}, creds)
 
 	act := newActor(t)
@@ -178,6 +208,22 @@ func TestService_SetProviderCredential_CreatesWhenAbsent(t *testing.T) {
 	assert.Equal(t, &act.PrincipalID, got.CreatedBy)
 }
 
+func TestService_SetProviderCredential_TenantNotFound(t *testing.T) {
+	creds := &mockCredentialRepo{}
+	creds.On("FindByTenantAndType", mock.Anything, mock.Anything, mock.Anything, ProviderTypeGoogle).
+		Return(nil, nil)
+	creds.On("Upsert", mock.Anything, mock.Anything, mock.AnythingOfType("*tenant.ProviderCredential")).
+		Return(ErrTenantNotFound)
+	svc := NewService(&mockTenantRepo{}, &mockDomainRepo{}, creds)
+
+	_, err := svc.SetProviderCredential(context.Background(), newActor(t), uuid.New(), ProviderTypeGoogle, []byte("ciphertext"))
+
+	require.Error(t, err)
+	var appErr *apperror.Error
+	require.ErrorAs(t, err, &appErr)
+	assert.Equal(t, "tenant.not_found", appErr.Key)
+}
+
 func TestService_SetProviderCredential_ReplacesWhenPresent(t *testing.T) {
 	existing := &ProviderCredential{
 		ID:              uuid.New(),
@@ -187,7 +233,7 @@ func TestService_SetProviderCredential_ReplacesWhenPresent(t *testing.T) {
 	creds := &mockCredentialRepo{}
 	creds.On("FindByTenantAndType", mock.Anything, mock.Anything, mock.Anything, ProviderTypeGoogle).
 		Return(existing, nil)
-	creds.On("Upsert", mock.Anything, existing).Return(nil)
+	creds.On("Upsert", mock.Anything, mock.Anything, existing).Return(nil)
 	svc := NewService(&mockTenantRepo{}, &mockDomainRepo{}, creds)
 
 	got, err := svc.SetProviderCredential(context.Background(), newActor(t), uuid.New(), ProviderTypeGoogle, []byte("new"))

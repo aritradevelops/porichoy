@@ -79,11 +79,19 @@ var _ tenant.ProviderCredentialRepository = (*ProviderCredentialRepository)(nil)
 // Upsert creates or replaces the credential for c's (TenantID, ProviderType) pair
 // (tenant.ProviderCredentialRepository) — a real INSERT ... ON CONFLICT DO UPDATE, so it
 // behaves correctly regardless of whether tenant.Service.SetProviderCredential is creating
-// (c.ID freshly generated) or updating (c.ID from the row it fetched) in place. c already
-// carries CreatedBy/UpdatedBy (set by the Service), so no actor.Actor is needed here
-// (CODING_STANDARDS.md §4).
-func (r *ProviderCredentialRepository) Upsert(ctx context.Context, c *tenant.ProviderCredential) error {
-	_, err := r.db.NewInsert().
+// (c.ID freshly generated) or updating (c.ID from the row it fetched) in place. First checks
+// act is authorized against c.TenantID via tenantAccessible (scope.go) — root may write for
+// any tenant; tenant scope only for itself or a descendant (AUTHORIZATION_MODEL.md §4) —
+// returning tenant.ErrTenantNotFound otherwise.
+func (r *ProviderCredentialRepository) Upsert(ctx context.Context, act actor.Actor, c *tenant.ProviderCredential) error {
+	ok, err := tenantAccessible(ctx, r.db, act, c.TenantID)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return tenant.ErrTenantNotFound
+	}
+	_, err = r.db.NewInsert().
 		Model(credentialToModel(c)).
 		On("CONFLICT (id) DO UPDATE").
 		Set("config_encrypted = EXCLUDED.config_encrypted").
@@ -94,11 +102,19 @@ func (r *ProviderCredentialRepository) Upsert(ctx context.Context, c *tenant.Pro
 }
 
 // FindByTenantAndType looks up tenantID's active credential for providerType
-// (tenant.ProviderCredentialRepository).
+// (tenant.ProviderCredentialRepository), after checking act is authorized against tenantID
+// via tenantAccessible (scope.go). Returns nil, nil (not an error) if not, matching
+// GetByID's framing.
 func (r *ProviderCredentialRepository) FindByTenantAndType(ctx context.Context, act actor.Actor, tenantID uuid.UUID, providerType tenant.ProviderType) (*tenant.ProviderCredential, error) {
-	_ = act
+	ok, err := tenantAccessible(ctx, r.db, act, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, nil
+	}
 	m := new(providerCredentialModel)
-	err := r.db.NewSelect().Model(m).
+	err = r.db.NewSelect().Model(m).
 		Where("tenant_id = ?", tenantID).
 		Where("provider_type = ?", string(providerType)).
 		Where("deleted_at IS NULL").
@@ -113,9 +129,17 @@ func (r *ProviderCredentialRepository) FindByTenantAndType(ctx context.Context, 
 }
 
 // ListByTenant lists tenantID's active provider credentials
-// (tenant.ProviderCredentialRepository).
+// (tenant.ProviderCredentialRepository), after checking act is authorized against tenantID
+// via tenantAccessible (scope.go). Returns nil, nil (not an error) if not, matching
+// GetByID's framing.
 func (r *ProviderCredentialRepository) ListByTenant(ctx context.Context, act actor.Actor, tenantID uuid.UUID) ([]*tenant.ProviderCredential, error) {
-	_ = act
+	ok, err := tenantAccessible(ctx, r.db, act, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, nil
+	}
 	var models []*providerCredentialModel
 	if err := r.db.NewSelect().Model(&models).
 		Where("tenant_id = ?", tenantID).
@@ -131,9 +155,33 @@ func (r *ProviderCredentialRepository) ListByTenant(ctx context.Context, act act
 }
 
 // SoftDelete removes id, freeing its (tenant, provider type) pair for reuse (the partial
-// unique index on tenant_provider_credential only covers non-deleted rows).
+// unique index on tenant_provider_credential only covers non-deleted rows). SoftDelete takes
+// only id, not the credential's tenant_id, so it fetches the row first to learn it, then
+// checks act's authorization against that tenant via tenantAccessible (scope.go). A missing
+// row or a denied check both no-op silently (nil error), same framing as
+// TenantRepository.SoftDelete.
 func (r *ProviderCredentialRepository) SoftDelete(ctx context.Context, act actor.Actor, id uuid.UUID) error {
-	_, err := r.db.NewUpdate().
+	m := new(providerCredentialModel)
+	err := r.db.NewSelect().Model(m).
+		Where("id = ?", id).
+		Where("deleted_at IS NULL").
+		Scan(ctx)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+
+	ok, err := tenantAccessible(ctx, r.db, act, m.TenantID)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return nil
+	}
+
+	_, err = r.db.NewUpdate().
 		Model((*providerCredentialModel)(nil)).
 		Set("deleted_at = ?", time.Now()).
 		Set("deleted_by = ?", act.PrincipalID).

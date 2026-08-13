@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/aritradevelops/porichoy/server/internal/actor"
 	"github.com/aritradevelops/porichoy/server/internal/adapters/postgres"
 	"github.com/aritradevelops/porichoy/server/internal/tenant"
 	"github.com/google/uuid"
@@ -40,12 +41,46 @@ func seedTenant(t *testing.T, domain string) (svc *tenant.Service, tenantID uuid
 		CreatedAt:   now,
 		UpdatedAt:   now,
 	}
-	require.NoError(t, tenants.Create(ctx, tt))
+	require.NoError(t, tenants.CreateRoot(ctx, tt))
 
 	d := &tenant.TenantDomain{ID: uuid.New(), TenantID: tt.ID, Domain: domain, CreatedAt: now}
-	require.NoError(t, domains.Create(ctx, d))
+	require.NoError(t, domains.Create(ctx, actor.Actor{Scope: actor.ScopeRoot}, d))
 
 	return tenant.NewService(tenants, domains, creds), tt.ID
+}
+
+// seedTenantTree seeds a 3-level chain root -> child -> grandchild, each with its own
+// resolvable domain (via the same repos, so descendant-scope authorization — computed from
+// the precomputed ancestors array, AUTHORIZATION_MODEL.md §4 — is exercised end-to-end
+// through real HTTP requests instead of directly against the repository). Domain names are
+// randomized per call (not just "tree-root.example.com" etc.) since multiple tests in this
+// package share one Postgres container/test-run (CODING_STANDARDS.md §6) and domains are
+// unique instance-wide — a fixed name would collide across tests. Returns rootDomain so
+// callers can resolve against the root without hardcoding it themselves.
+func seedTenantTree(t *testing.T) (svc *tenant.Service, rootID, childID, grandchildID uuid.UUID, rootDomain string) {
+	t.Helper()
+	ctx := context.Background()
+	tenants := postgres.NewTenantRepository(testDB)
+	domains := postgres.NewDomainRepository(testDB)
+	creds := postgres.NewProviderCredentialRepository(testDB)
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	root := actor.Actor{Scope: actor.ScopeRoot}
+	suffix := uuid.NewString()
+
+	rootTenant := &tenant.Tenant{ID: uuid.New(), Name: "Tree Root", LoginLayout: tenant.LoginLayoutCentered, CreatedAt: now, UpdatedAt: now}
+	require.NoError(t, tenants.CreateRoot(ctx, rootTenant))
+	rootDomain = suffix + "-root.example.com"
+	require.NoError(t, domains.Create(ctx, root, &tenant.TenantDomain{ID: uuid.New(), TenantID: rootTenant.ID, Domain: rootDomain, CreatedAt: now}))
+
+	childTenant := &tenant.Tenant{ID: uuid.New(), ParentID: &rootTenant.ID, Name: "Tree Child", LoginLayout: tenant.LoginLayoutCentered, CreatedAt: now, UpdatedAt: now}
+	require.NoError(t, tenants.Create(ctx, root, childTenant))
+	require.NoError(t, domains.Create(ctx, root, &tenant.TenantDomain{ID: uuid.New(), TenantID: childTenant.ID, Domain: suffix + "-child.example.com", CreatedAt: now}))
+
+	grandchildTenant := &tenant.Tenant{ID: uuid.New(), ParentID: &childTenant.ID, Name: "Tree Grandchild", LoginLayout: tenant.LoginLayoutCentered, CreatedAt: now, UpdatedAt: now}
+	require.NoError(t, tenants.Create(ctx, root, grandchildTenant))
+	require.NoError(t, domains.Create(ctx, root, &tenant.TenantDomain{ID: uuid.New(), TenantID: grandchildTenant.ID, Domain: suffix + "-grandchild.example.com", CreatedAt: now}))
+
+	return tenant.NewService(tenants, domains, creds), rootTenant.ID, childTenant.ID, grandchildTenant.ID, rootDomain
 }
 
 func doRequest(t *testing.T, app interface {
@@ -112,14 +147,42 @@ func TestIntegration_TenantLifecycle(t *testing.T) {
 	require.Equal(t, tenantID.String(), resolved["tenant_id"])
 }
 
-func TestIntegration_ExactMatchScope_CannotReadOtherTenant(t *testing.T) {
-	svc, _ := seedTenant(t, "scope-a.example.com")
-	_, otherTenantID := seedTenant(t, "scope-b.example.com")
+func TestIntegration_DescendantScope_ReachesDescendantButNotSibling(t *testing.T) {
+	svc, _, _, grandchildID, rootDomain := seedTenantTree(t)
 	app := New(svc)
 
-	// scope-a's resolved actor tries to fetch scope-b's tenant by ID — must come back
-	// as a 404, not the other tenant's data (AUTHORIZATION_MODEL.md §4's exact-match rule).
-	status, env := doRequest(t, app, http.MethodGet, "scope-a.example.com", "/api/v1/tenants/get/"+otherTenantID.String(), nil)
+	// tree-root's resolved actor (tenant scope) can reach a grandchild it didn't directly
+	// create — AUTHORIZATION_MODEL.md §4's descendant-access rule, driven by the
+	// precomputed ancestors array rather than an exact match.
+	status, env := doRequest(t, app, http.MethodGet, rootDomain, "/api/v1/tenants/get/"+grandchildID.String(), nil)
+	require.Equal(t, http.StatusOK, status)
+	require.Nil(t, env.Error)
+
+	// A tenant outside tree-root's subtree entirely stays unreachable — siblings still
+	// can't see each other.
+	_, siblingID := seedTenant(t, "unrelated-sibling-"+uuid.NewString()+".example.com")
+	status, env = doRequest(t, app, http.MethodGet, rootDomain, "/api/v1/tenants/get/"+siblingID.String(), nil)
+	require.Equal(t, http.StatusNotFound, status)
+	require.Equal(t, "tenant.not_found", env.Error.Key)
+}
+
+func TestIntegration_DomainsRegister_DescendantScope(t *testing.T) {
+	svc, _, _, grandchildID, rootDomain := seedTenantTree(t)
+	app := New(svc)
+
+	// tree-root's resolved actor (tenant scope) can register a domain for the grandchild
+	// tenant it didn't directly create — same descendant-access rule as the tenants module,
+	// now enforced inside DomainRepository.Create (AUTHORIZATION_MODEL.md §4).
+	status, env := doRequest(t, app, http.MethodPost, rootDomain, "/api/v1/domains/register",
+		registerDomainRequest{TenantID: grandchildID, Domain: "new-for-grandchild-" + uuid.NewString() + ".example.com"})
+	require.Equal(t, http.StatusCreated, status)
+	require.Nil(t, env.Error)
+
+	// A tenant outside tree-root's subtree stays unreachable — 404, not 403, consistent
+	// with the "not found, not forbidden" framing used throughout this bounded context.
+	_, siblingID := seedTenant(t, "domains-sibling-"+uuid.NewString()+".example.com")
+	status, env = doRequest(t, app, http.MethodPost, rootDomain, "/api/v1/domains/register",
+		registerDomainRequest{TenantID: siblingID, Domain: "should-fail-" + uuid.NewString() + ".example.com"})
 	require.Equal(t, http.StatusNotFound, status)
 	require.Equal(t, "tenant.not_found", env.Error.Key)
 }

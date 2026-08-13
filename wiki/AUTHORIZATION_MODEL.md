@@ -77,15 +77,41 @@ depending on the resource.
   `root`. At `app` scope, it's excluded outright — an app-level admin (someone scoped to a
   single specific app) can never see the system app, even incidentally. Only tenant admins
   and root admins can.
-- **`tenant` module**: exact-match rather than the default `tenant_id = :tenant_id` (a
+- **`tenant` module**: descendant-access rather than the default `tenant_id = :tenant_id` (a
   `Tenant` row's own `id` *is* the tenant, there's no `tenant_id` foreign key on itself to
-  filter by). Below `root` scope, a caller may only fetch (`GetByID`) or list the children
-  of (`ListChildren`) their own `act.TenantID` — never a sibling or a descendant, even
-  though tenants form an arbitrary-depth tree (PRD §4). A scope mismatch returns "not
-  found" rather than a forbidden error, consistent with this module's existing
-  `FindByID`/`RegisterDomain` convention of not letting a caller distinguish "doesn't
-  exist" from "exists but isn't yours." Resolves the open question in
-  USER_JOURNEYS_ADMIN_TENANT_MANAGEMENT.md §8.
+  filter by, and tenants form an arbitrary-depth tree, PRD §4). Only `root` and `tenant` are
+  valid scopes for this module — `org`/`app`/`own` are denied outright, not merely unused.
+  Below `root` scope, a caller may create/fetch (`GetByID`)/list-children-of
+  (`ListChildren`)/delete their own `act.TenantID` **or any descendant of it** — a sibling or
+  an ancestor is still out of reach, but a grandchild the caller didn't directly create is
+  fair game. This is answered by a precomputed `ancestors uuid[]` column on every tenant row
+  (DATA_MODEL.md `tenants`): set at creation time to the parent's own `ancestors` plus the
+  parent's `id` (no recursive query), so "is `act.TenantID` an ancestor-or-self of the
+  target" is a single containment check (`id = :tenant_id OR ancestors @> ARRAY[:tenant_id]`)
+  rather than a tree walk. `Create` runs this same check against the *parent* being created
+  under, doubling as the source of the new row's `ancestors`. A scope mismatch — including a
+  missing parent on create — returns "not found" rather than a forbidden error, consistent
+  with this module's existing `FindByID`/`RegisterDomain` convention of not letting a caller
+  distinguish "doesn't exist" from "exists but isn't yours." Resolves the open question in
+  USER_JOURNEYS_ADMIN_TENANT_MANAGEMENT.md §8 — for the second time: an earlier pass at this
+  (now superseded) had wrongly resolved it as exact-match only, see that doc's §8 for the
+  correction.
+- **`domains` and `provider_credentials` modules**: descendant-access, same breadth as the
+  `tenant` module and the same restriction to `root`/`tenant` scopes only (`org`/`app`/`own`
+  denied outright). Unlike `tenant`, these are ordinary `tenant_id`-FK resources (`domain_registries`,
+  `tenant_provider_credentials`) — but the check still isn't the default `tenant_id =
+  :tenant_id`, since a tenant admin managing a subtree needs to reach a descendant's domains
+  and credentials too, not just their own tenant's. Neither table carries an `ancestors`
+  column itself, so the containment check always runs as one lookup against `tenants` (the
+  operation's specific `tenant_id`, checked the same way `tenant`'s own `GetByID` checks a
+  target — see `tenantAccessible` in `internal/adapters/postgres/scope.go`), never a
+  subquery or join reaching into `domain_registries`/`tenant_provider_credentials` directly.
+  `DomainRepository.Create`/`ProviderCredentialRepository.Upsert` run this check against the
+  tenant the domain/credential is being created for, returning `tenant.ErrTenantNotFound`
+  (surfaced as `tenant.not_found`, 404 — not `403`) if it's missing or out of scope;
+  `ListByTenant`/`FindByTenantAndType`/`SoftDelete` run it against the `tenantID` they're
+  already given (or, for `SoftDelete`, the row's `tenant_id` fetched first) and no-op/return
+  empty rather than erroring, matching the `tenant` module's own read-path framing.
 
 Additional modules will define their own mappings as they're built; this table is expected
 to grow, not be exhaustive from day one.

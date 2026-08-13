@@ -32,7 +32,12 @@ func (d *TenantDomain) IsDeleted() bool {
 
 // DomainRepository persists and retrieves TenantDomains.
 type DomainRepository interface {
-	Create(ctx context.Context, d *TenantDomain) error
+	// Create persists d, after checking act is authorized to create a domain for
+	// d.TenantID (AUTHORIZATION_MODEL.md §4: root may create for any tenant; tenant scope
+	// only for itself or a descendant), returning tenant.ErrTenantNotFound otherwise. d
+	// already carries CreatedBy (set by tenant.Service), but act is still needed for this
+	// authorization check — the same reason tenant.Repository.Create needs one.
+	Create(ctx context.Context, act actor.Actor, d *TenantDomain) error
 	// FindByDomain resolves the tenant a given origin belongs to. Returns nil,
 	// nil if no tenant has registered this domain.
 	//

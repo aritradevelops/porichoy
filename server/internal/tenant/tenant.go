@@ -8,6 +8,7 @@ package tenant
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/aritradevelops/porichoy/server/internal/actor"
@@ -44,6 +45,12 @@ type Tenant struct {
 	ID       uuid.UUID
 	ParentID *uuid.UUID
 	Name     string
+	// Ancestors is the tenant's full chain of ancestor IDs, precomputed at creation time as
+	// the parent's own Ancestors plus the parent's ID (no recursive query). This is what
+	// makes descendant-scope authorization (AUTHORIZATION_MODEL.md §4) a single containment
+	// check — "is act.TenantID in t.Ancestors" — instead of a recursive tree walk. Empty for
+	// the root tenant.
+	Ancestors []uuid.UUID
 
 	LogoURL             string
 	BrandImageURL       *string // only used when LoginLayout is LoginLayoutSplit
@@ -74,14 +81,35 @@ func (t *Tenant) IsDeleted() bool {
 	return t.DeletedAt != nil
 }
 
+// ErrTenantNotFound is returned whenever a referenced tenant either doesn't exist or exists
+// but falls outside act's authorized subtree (AUTHORIZATION_MODEL.md §4) — both cases return
+// the same sentinel, so a caller can't distinguish "doesn't exist" from "exists but isn't
+// yours", consistent with this package's "not found, not forbidden" convention. Used by
+// Repository.Create (the referenced tenant is t.ParentID) and, in the same way, by
+// DomainRepository.Create and ProviderCredentialRepository.Upsert (the referenced tenant is
+// the one the domain/credential is being created for).
+var ErrTenantNotFound = errors.New("tenant: not found")
+
 // Repository persists and retrieves Tenants.
 //
-// Create and Update take no actor.Actor — the *Tenant being persisted already carries
-// CreatedBy/UpdatedBy (set by the Service), so it would be redundant. SoftDelete and
-// ListChildren are authorized-only operations with no entity to carry that information, so
-// they take one (CODING_STANDARDS.md §4).
+// Update takes no actor.Actor — the *Tenant being persisted already carries UpdatedBy (set
+// by the Service), so it would be redundant, and by the time Update is called the entity was
+// already fetched (and thus authorized) via GetByID. SoftDelete and ListChildren are
+// authorized-only operations with no entity to carry that information, so they take one
+// (CODING_STANDARDS.md §4). Create also takes one now: unlike Update, there's no existing row
+// to have already been authorized against, and Create needs act to both authorize against
+// t.ParentID and compute t.Ancestors from the parent (see Create's own doc).
 type Repository interface {
-	Create(ctx context.Context, t *Tenant) error
+	// CreateRoot persists the root tenant. Pre-authentication bootstrap only — no
+	// actor.Actor exists yet at this point (CreateRootTenant), t.ParentID is always nil, and
+	// t.Ancestors is always empty.
+	CreateRoot(ctx context.Context, t *Tenant) error
+	// Create persists a child tenant under t.ParentID (always non-nil — Service.CreateTenant
+	// defaults it to act.TenantID before calling this). Checks act is authorized to create
+	// under that parent (AUTHORIZATION_MODEL.md §4: root may create under any parent; tenant
+	// scope only under itself or a descendant), returning ErrTenantNotFound otherwise, and
+	// computes t.Ancestors from the parent's own Ancestors plus the parent's ID.
+	Create(ctx context.Context, act actor.Actor, t *Tenant) error
 	// FindByID is a pre-authentication, unscoped lookup by primary key — used by
 	// Service.ResolveTenantByDomain (TECHNICAL_DESIGN.md §3.3), which runs before an
 	// actor.Actor can exist at all. Authorized code should use GetByID instead.

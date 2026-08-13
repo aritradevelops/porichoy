@@ -70,6 +70,7 @@ no normalization benefit. Token TTLs are the exception: those live on `apps` (§
 |---|---|---|
 | `id` | uuid, PK | |
 | `parent_id` | uuid, FK → tenants.id, nullable | null for the root tenant |
+| `ancestors` | uuid[], GIN-indexed | this row's full chain of ancestor ids, empty for the root tenant — see below |
 | `name` | text | |
 | `logo_url` | text | tenant's own logo, shown on the login screen (TECHNICAL_DESIGN §1) |
 | `brand_image_url` | text, nullable | used only by the Split layout |
@@ -80,6 +81,14 @@ no normalization benefit. Token TTLs are the exception: those live on `apps` (§
 | `created_at`, `updated_at` | timestamp | |
 | `created_by`, `updated_by` | uuid, principal (§0), nullable | null for the root tenant (system-bootstrapped) |
 | `deleted_at`, `deleted_by` | timestamp / uuid, nullable | |
+
+`ancestors` is what makes descendant-scope authorization (AUTHORIZATION_MODEL.md §4) a
+single containment check instead of a recursive tree walk: computed at creation time as the
+parent's own `ancestors` plus the parent's `id` — no recursive query needed, since the
+parent row already carries its own full chain. When a tenant is soft-deleted, its `id` is
+stripped out of every other row's `ancestors` array in the same transaction (not a cascade
+delete — a surviving descendant keeps its remaining ancestors and its own `parent_id` may
+end up pointing at a soft-deleted row, which is an accepted consequence, not a bug).
 
 ### `domain_registries`
 Origin/domain → tenant resolution (TECHNICAL_DESIGN §3.3). Stays a separate table — a

@@ -30,12 +30,13 @@ func TestProviderCredentialRepository_UpsertCreatesThenUpdates(t *testing.T) {
 	tenants := NewTenantRepository(testDB)
 	creds := NewProviderCredentialRepository(testDB)
 	ctx := context.Background()
+	root := rootActor()
 
 	tt := newTestTenant("Brand G", nil)
-	require.NoError(t, tenants.Create(ctx, tt))
+	require.NoError(t, tenants.CreateRoot(ctx, tt))
 
 	c := newTestCredential(tt.ID, tenant.ProviderTypeGoogle, "old-ciphertext")
-	require.NoError(t, creds.Upsert(ctx, c))
+	require.NoError(t, creds.Upsert(ctx, root, c))
 
 	act := actor.Actor{PrincipalID: uuid.New(), TenantID: tt.ID, Scope: actor.ScopeTenant}
 	got, err := creds.FindByTenantAndType(ctx, act, tt.ID, tenant.ProviderTypeGoogle)
@@ -46,7 +47,7 @@ func TestProviderCredentialRepository_UpsertCreatesThenUpdates(t *testing.T) {
 	// Same ID, new ciphertext — Upsert must update in place, not insert a second row.
 	got.ConfigEncrypted = []byte("new-ciphertext")
 	got.UpdatedAt = time.Now().UTC().Truncate(time.Microsecond)
-	require.NoError(t, creds.Upsert(ctx, got))
+	require.NoError(t, creds.Upsert(ctx, root, got))
 
 	list, err := creds.ListByTenant(ctx, act, tt.ID)
 	require.NoError(t, err)
@@ -60,7 +61,7 @@ func TestProviderCredentialRepository_FindByTenantAndType_NotFound(t *testing.T)
 	ctx := context.Background()
 
 	tt := newTestTenant("Brand H", nil)
-	require.NoError(t, tenants.Create(ctx, tt))
+	require.NoError(t, tenants.CreateRoot(ctx, tt))
 
 	act := actor.Actor{PrincipalID: uuid.New(), TenantID: tt.ID, Scope: actor.ScopeTenant}
 	got, err := creds.FindByTenantAndType(ctx, act, tt.ID, tenant.ProviderTypeApple)
@@ -73,12 +74,13 @@ func TestProviderCredentialRepository_SoftDeleteThenReAdd(t *testing.T) {
 	tenants := NewTenantRepository(testDB)
 	creds := NewProviderCredentialRepository(testDB)
 	ctx := context.Background()
+	root := rootActor()
 
 	tt := newTestTenant("Brand I", nil)
-	require.NoError(t, tenants.Create(ctx, tt))
+	require.NoError(t, tenants.CreateRoot(ctx, tt))
 
 	c := newTestCredential(tt.ID, tenant.ProviderTypeOTPEmail, "ciphertext-1")
-	require.NoError(t, creds.Upsert(ctx, c))
+	require.NoError(t, creds.Upsert(ctx, root, c))
 
 	act := actor.Actor{PrincipalID: uuid.New(), TenantID: tt.ID, Scope: actor.ScopeTenant}
 	require.NoError(t, creds.SoftDelete(ctx, act, c.ID))
@@ -90,5 +92,83 @@ func TestProviderCredentialRepository_SoftDeleteThenReAdd(t *testing.T) {
 	// The partial unique index on (tenant_id, provider_type) only covers active rows, so a
 	// new credential for the same pair must be insertable after the old one is deleted.
 	replacement := newTestCredential(tt.ID, tenant.ProviderTypeOTPEmail, "ciphertext-2")
-	require.NoError(t, creds.Upsert(ctx, replacement))
+	require.NoError(t, creds.Upsert(ctx, root, replacement))
+}
+
+func TestProviderCredentialRepository_Upsert_SucceedsForOwnAndDescendantTenant(t *testing.T) {
+	tenants := NewTenantRepository(testDB)
+	creds := NewProviderCredentialRepository(testDB)
+	ctx := context.Background()
+	root := rootActor()
+
+	self := mustCreateRoot(t, tenants, "Cred Self")
+	child := mustCreateChild(t, tenants, root, "Cred Child", self.ID)
+
+	act := actor.Actor{PrincipalID: uuid.New(), TenantID: self.ID, Scope: actor.ScopeTenant}
+
+	require.NoError(t, creds.Upsert(ctx, act, newTestCredential(self.ID, tenant.ProviderTypeGoogle, "own")))
+	require.NoError(t, creds.Upsert(ctx, act, newTestCredential(child.ID, tenant.ProviderTypeGoogle, "descendant")))
+}
+
+func TestProviderCredentialRepository_Upsert_DeniedForUnrelatedTenant(t *testing.T) {
+	tenants := NewTenantRepository(testDB)
+	creds := NewProviderCredentialRepository(testDB)
+	ctx := context.Background()
+
+	self := mustCreateRoot(t, tenants, "Cred Self 2")
+	unrelated := mustCreateRoot(t, tenants, "Cred Unrelated")
+
+	act := actor.Actor{PrincipalID: uuid.New(), TenantID: self.ID, Scope: actor.ScopeTenant}
+	err := creds.Upsert(ctx, act, newTestCredential(unrelated.ID, tenant.ProviderTypeGoogle, "nope"))
+
+	require.ErrorIs(t, err, tenant.ErrTenantNotFound)
+}
+
+func TestProviderCredentialRepository_Upsert_NonTenantScopeDenied(t *testing.T) {
+	tenants := NewTenantRepository(testDB)
+	creds := NewProviderCredentialRepository(testDB)
+	ctx := context.Background()
+
+	self := mustCreateRoot(t, tenants, "Cred Self 3")
+
+	act := actor.Actor{PrincipalID: uuid.New(), TenantID: self.ID, Scope: actor.ScopeApp}
+	err := creds.Upsert(ctx, act, newTestCredential(self.ID, tenant.ProviderTypeGoogle, "nope"))
+
+	require.ErrorIs(t, err, tenant.ErrTenantNotFound)
+}
+
+func TestProviderCredentialRepository_ListByTenant_DeniedForUnrelatedTenantReturnsEmpty(t *testing.T) {
+	tenants := NewTenantRepository(testDB)
+	creds := NewProviderCredentialRepository(testDB)
+	ctx := context.Background()
+	root := rootActor()
+
+	self := mustCreateRoot(t, tenants, "Cred Self 4")
+	unrelated := mustCreateRoot(t, tenants, "Cred Unrelated 2")
+	require.NoError(t, creds.Upsert(ctx, root, newTestCredential(unrelated.ID, tenant.ProviderTypeGoogle, "hidden")))
+
+	act := actor.Actor{PrincipalID: uuid.New(), TenantID: self.ID, Scope: actor.ScopeTenant}
+	list, err := creds.ListByTenant(ctx, act, unrelated.ID)
+
+	require.NoError(t, err)
+	assert.Empty(t, list)
+}
+
+func TestProviderCredentialRepository_SoftDelete_DeniedOutsideSubtreeIsNoop(t *testing.T) {
+	tenants := NewTenantRepository(testDB)
+	creds := NewProviderCredentialRepository(testDB)
+	ctx := context.Background()
+	root := rootActor()
+
+	self := mustCreateRoot(t, tenants, "Cred Self 5")
+	unrelated := mustCreateRoot(t, tenants, "Cred Unrelated 3")
+	c := newTestCredential(unrelated.ID, tenant.ProviderTypeGoogle, "survives")
+	require.NoError(t, creds.Upsert(ctx, root, c))
+
+	act := actor.Actor{PrincipalID: uuid.New(), TenantID: self.ID, Scope: actor.ScopeTenant}
+	require.NoError(t, creds.SoftDelete(ctx, act, c.ID))
+
+	got, err := creds.FindByTenantAndType(ctx, root, unrelated.ID, tenant.ProviderTypeGoogle)
+	require.NoError(t, err)
+	require.NotNil(t, got, "credential must survive a denied delete attempt")
 }

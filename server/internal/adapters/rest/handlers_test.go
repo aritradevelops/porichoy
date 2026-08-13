@@ -86,7 +86,7 @@ func TestTenantResolution_UnregisteredHost(t *testing.T) {
 
 func TestTenants_Create_OK(t *testing.T) {
 	ta := newTestApp(t)
-	ta.tenants.On("Create", mock.Anything, mock.AnythingOfType("*tenant.Tenant")).Return(nil)
+	ta.tenants.On("Create", mock.Anything, mock.Anything, mock.AnythingOfType("*tenant.Tenant")).Return(nil)
 
 	status, env := ta.do(t, http.MethodPost, "/api/v1/tenants/create", createTenantRequest{Name: "Brand A"}, nil)
 
@@ -103,7 +103,7 @@ func TestTenants_Create_ValidationError(t *testing.T) {
 	require.Equal(t, http.StatusBadRequest, status)
 	require.NotNil(t, env.Error)
 	require.Equal(t, "validation.failed", env.Error.Key)
-	ta.tenants.AssertNotCalled(t, "Create", mock.Anything, mock.Anything)
+	ta.tenants.AssertNotCalled(t, "Create", mock.Anything, mock.Anything, mock.Anything)
 }
 
 func TestTenants_Get_OK(t *testing.T) {
@@ -162,36 +162,10 @@ func TestTenants_Configure_InvalidLoginLayout(t *testing.T) {
 func TestDomains_Register_OK(t *testing.T) {
 	ta := newTestApp(t)
 	ta.domains.On("FindByDomain", mock.Anything, "new.example.com").Return(nil, nil)
-	ta.domains.On("Create", mock.Anything, mock.AnythingOfType("*tenant.TenantDomain")).Return(nil)
+	ta.domains.On("Create", mock.Anything, mock.Anything, mock.AnythingOfType("*tenant.TenantDomain")).Return(nil)
 
 	status, env := ta.do(t, http.MethodPost, "/api/v1/domains/register",
 		registerDomainRequest{TenantID: ta.tenantID, Domain: "new.example.com"}, nil)
-
-	require.Equal(t, http.StatusCreated, status)
-	require.Nil(t, env.Error)
-}
-
-func TestDomains_Register_ForbiddenForOtherTenant(t *testing.T) {
-	ta := newTestApp(t)
-	otherTenant := uuid.New()
-
-	status, env := ta.do(t, http.MethodPost, "/api/v1/domains/register",
-		registerDomainRequest{TenantID: otherTenant, Domain: "new.example.com"}, nil)
-
-	require.Equal(t, http.StatusForbidden, status)
-	require.Equal(t, "domain.forbidden", env.Error.Key)
-	ta.domains.AssertNotCalled(t, "Create", mock.Anything, mock.Anything)
-}
-
-func TestDomains_Register_RootCanRegisterForAnyTenant(t *testing.T) {
-	ta := newTestApp(t)
-	otherTenant := uuid.New()
-	ta.domains.On("FindByDomain", mock.Anything, "other.example.com").Return(nil, nil)
-	ta.domains.On("Create", mock.Anything, mock.AnythingOfType("*tenant.TenantDomain")).Return(nil)
-
-	status, env := ta.do(t, http.MethodPost, "/api/v1/domains/register",
-		registerDomainRequest{TenantID: otherTenant, Domain: "other.example.com"},
-		map[string]string{"X-Debug-Scope": "root"})
 
 	require.Equal(t, http.StatusCreated, status)
 	require.Nil(t, env.Error)
