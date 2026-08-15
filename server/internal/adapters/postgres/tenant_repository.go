@@ -99,7 +99,7 @@ func tenantToModel(t *tenant.Tenant) *tenantModel {
 
 // TenantRepository implements tenant.Repository using Postgres via Bun.
 type TenantRepository struct {
-	db *bun.DB
+	db bun.IDB
 }
 
 // NewTenantRepository builds a TenantRepository from an open Bun connection.
@@ -133,8 +133,11 @@ func withTenantScope[Q interface{ QueryBuilder() bun.QueryBuilder }](q Q, act ac
 
 // CreateRoot persists the root tenant (tenant.Repository). Pre-authentication bootstrap
 // only — no actor.Actor exists yet, t.ParentID is always nil, t.Ancestors is always empty.
+// Participates in an ambient transaction if ctx carries one (tx.go) — the CLI seed command
+// wraps its whole bootstrap sequence (root tenant, system app, roles, superadmin) in one,
+// this being the first write in it.
 func (r *TenantRepository) CreateRoot(ctx context.Context, t *tenant.Tenant) error {
-	_, err := r.db.NewInsert().Model(tenantToModel(t)).Exec(ctx)
+	_, err := dbFromContext(ctx, r.db).NewInsert().Model(tenantToModel(t)).Exec(ctx)
 	return err
 }
 
@@ -262,4 +265,26 @@ func (r *TenantRepository) ListChildren(ctx context.Context, act actor.Actor, pa
 		result[i] = tenantFromModel(m)
 	}
 	return result, nil
+}
+
+// List returns one page of every tenant act is authorized to see (tenant.Repository) — root
+// scope gets every row, tenant scope gets itself plus its full subtree, via the same
+// withTenantScope filter GetByID/ListChildren use, just applied with no parent_id
+// restriction at all. Ordered by created_at so offset pagination is stable across pages.
+func (r *TenantRepository) List(ctx context.Context, act actor.Actor, params tenant.ListParams) (tenant.ListResult, error) {
+	var models []*tenantModel
+	q := r.db.NewSelect().Model(&models).
+		Where("deleted_at IS NULL").
+		Order("created_at ASC").
+		Limit(params.PageSize).
+		Offset((params.Page - 1) * params.PageSize)
+	total, err := withTenantScope(q, act).ScanAndCount(ctx)
+	if err != nil {
+		return tenant.ListResult{}, err
+	}
+	items := make([]*tenant.Tenant, len(models))
+	for i, m := range models {
+		items[i] = tenantFromModel(m)
+	}
+	return tenant.ListResult{Items: items, Total: total, Page: params.Page, PageSize: params.PageSize}, nil
 }

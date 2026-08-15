@@ -82,9 +82,14 @@ depending on the resource.
   filter by, and tenants form an arbitrary-depth tree, PRD §4). Only `root` and `tenant` are
   valid scopes for this module — `org`/`app`/`own` are denied outright, not merely unused.
   Below `root` scope, a caller may create/fetch (`GetByID`)/list-children-of
-  (`ListChildren`)/delete their own `act.TenantID` **or any descendant of it** — a sibling or
-  an ancestor is still out of reach, but a grandchild the caller didn't directly create is
-  fair game. This is answered by a precomputed `ancestors uuid[]` column on every tenant row
+  (`ListChildren`)/list-all-of (`List`)/delete their own `act.TenantID` **or any descendant of
+  it** — a sibling or an ancestor is still out of reach, but a grandchild the caller didn't
+  directly create is fair game. `ListChildren` and `List` differ only in breadth:
+  `ListChildren` is one level of a specific parent (tree drill-down), `List` is the caller's
+  entire reachable set flattened (root: every tenant; tenant scope: itself plus its full
+  subtree) — this backs the root-admin "all tenants" table
+  (USER_JOURNEYS_ADMIN_TENANT_MANAGEMENT.md §2). This is answered by a precomputed `ancestors
+  uuid[]` column on every tenant row
   (DATA_MODEL.md `tenants`): set at creation time to the parent's own `ancestors` plus the
   parent's `id` (no recursive query), so "is `act.TenantID` an ancestor-or-self of the
   target" is a single containment check (`id = :tenant_id OR ancestors @> ARRAY[:tenant_id]`)

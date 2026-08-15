@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/aritradevelops/porichoy/server/internal/identity"
 	"github.com/aritradevelops/porichoy/server/internal/tenant"
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
@@ -21,11 +22,17 @@ const testHost = "acme.example.com"
 // exercises the actual middleware chain and handler code — only the DB is faked, matching
 // how internal/tenant/service_test.go isolates Service from Postgres.
 type testApp struct {
-	app      *fiber.App
-	tenants  *mockTenantRepo
-	domains  *mockDomainRepo
-	creds    *mockCredentialRepo
-	tenantID uuid.UUID
+	app         *fiber.App
+	tenants     *mockTenantRepo
+	domains     *mockDomainRepo
+	creds       *mockCredentialRepo
+	users       *mockUserRepo
+	passwords   *mockPasswordRepo
+	identityApps *mockIdentityAppRepo
+	sessions    *mockSessionRepo
+	assignments *mockRoleAssignmentRepo
+	tokens      *mockTokenIssuer
+	tenantID    uuid.UUID
 }
 
 // newTestApp builds a testApp with testHost already resolving to a fixture tenant
@@ -36,6 +43,12 @@ func newTestApp(t *testing.T) *testApp {
 	tenants := &mockTenantRepo{}
 	domains := &mockDomainRepo{}
 	creds := &mockCredentialRepo{}
+	users := &mockUserRepo{}
+	passwords := &mockPasswordRepo{}
+	identityApps := &mockIdentityAppRepo{}
+	sessions := &mockSessionRepo{}
+	assignments := &mockRoleAssignmentRepo{}
+	tokens := &mockTokenIssuer{}
 
 	tenantID := uuid.New()
 	domains.On("FindByDomain", mock.Anything, testHost).
@@ -43,8 +56,21 @@ func newTestApp(t *testing.T) *testApp {
 	tenants.On("FindByID", mock.Anything, tenantID).
 		Return(&tenant.Tenant{ID: tenantID, Name: "Acme"}, nil)
 
-	svc := tenant.NewService(tenants, domains, creds)
-	return &testApp{app: New(svc), tenants: tenants, domains: domains, creds: creds, tenantID: tenantID}
+	tenantSvc := tenant.NewService(tenants, domains, creds)
+	identitySvc := identity.NewService(users, passwords, identityApps, sessions, assignments, tokens, noopTxRunner{})
+	return &testApp{
+		app:          New(tenantSvc, identitySvc),
+		tenants:      tenants,
+		domains:      domains,
+		creds:        creds,
+		users:        users,
+		passwords:    passwords,
+		identityApps: identityApps,
+		sessions:     sessions,
+		assignments:  assignments,
+		tokens:       tokens,
+		tenantID:     tenantID,
+	}
 }
 
 // do sends a request against ta.app and returns the decoded envelope alongside the raw
@@ -157,6 +183,39 @@ func TestTenants_Configure_InvalidLoginLayout(t *testing.T) {
 	require.Equal(t, http.StatusBadRequest, status)
 	require.Equal(t, "validation.failed", env.Error.Key)
 	ta.tenants.AssertNotCalled(t, "GetByID", mock.Anything, mock.Anything, mock.Anything)
+}
+
+func TestTenants_List_OK(t *testing.T) {
+	ta := newTestApp(t)
+	other := uuid.New()
+	ta.tenants.On("List", mock.Anything, mock.Anything, tenant.ListParams{Page: 1, PageSize: 20}).
+		Return(tenant.ListResult{
+			Items:    []*tenant.Tenant{{ID: ta.tenantID, Name: "Acme"}, {ID: other, Name: "Other"}},
+			Total:    2,
+			Page:     1,
+			PageSize: 20,
+		}, nil)
+
+	status, env := ta.do(t, http.MethodGet, "/api/v1/tenants/list", nil, nil)
+
+	require.Equal(t, http.StatusOK, status)
+	require.Nil(t, env.Error)
+	data := env.Data.(map[string]any)
+	require.Len(t, data["items"], 2)
+	require.Equal(t, float64(2), data["total"])
+	require.Equal(t, float64(1), data["page"])
+	require.Equal(t, float64(20), data["page_size"])
+}
+
+func TestTenants_List_PassesPageParamsThrough(t *testing.T) {
+	ta := newTestApp(t)
+	ta.tenants.On("List", mock.Anything, mock.Anything, tenant.ListParams{Page: 2, PageSize: 5}).
+		Return(tenant.ListResult{Page: 2, PageSize: 5}, nil)
+
+	status, env := ta.do(t, http.MethodGet, "/api/v1/tenants/list?page=2&page_size=5", nil, nil)
+
+	require.Equal(t, http.StatusOK, status)
+	require.Nil(t, env.Error)
 }
 
 func TestDomains_Register_OK(t *testing.T) {
