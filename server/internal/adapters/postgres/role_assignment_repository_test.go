@@ -39,3 +39,46 @@ func TestRoleAssignmentRepository_Create(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 1, count)
 }
+
+func TestRoleAssignmentRepository_ListByPrincipal(t *testing.T) {
+	tenants := NewTenantRepository(testDB)
+	apps := NewAppRepository(testDB)
+	roles := NewRoleRepository(testDB)
+	users := NewUserRepository(testDB)
+	assignments := NewRoleAssignmentRepository(testDB)
+	ctx := context.Background()
+
+	tt := mustCreateRoot(t, tenants, "ListByPrincipal Tenant")
+	sysApp := newTestSystemApp(tt.ID)
+	require.NoError(t, apps.CreateSystem(ctx, sysApp))
+	role1 := newTestSystemRole(tt.ID, sysApp.ID, "Super Admin")
+	require.NoError(t, roles.CreateSystem(ctx, role1))
+	role2 := newTestSystemRole(tt.ID, sysApp.ID, "Tenant Admin")
+	require.NoError(t, roles.CreateSystem(ctx, role2))
+	u := newTestUser(tt.ID, "list-by-principal-"+uuid.NewString()+"@example.com")
+	require.NoError(t, users.Create(ctx, u))
+	other := newTestUser(tt.ID, "other-"+uuid.NewString()+"@example.com")
+	require.NoError(t, users.Create(ctx, other))
+
+	require.NoError(t, assignments.Create(ctx, &authorization.RoleAssignment{ID: uuid.New(), PrincipalID: u.ID, RoleID: role1.ID}))
+	require.NoError(t, assignments.Create(ctx, &authorization.RoleAssignment{ID: uuid.New(), PrincipalID: u.ID, RoleID: role2.ID}))
+	// Assigned to a different principal — proves the lookup filters by principal, not just
+	// "return everything".
+	require.NoError(t, assignments.Create(ctx, &authorization.RoleAssignment{ID: uuid.New(), PrincipalID: other.ID, RoleID: role1.ID}))
+
+	got, err := assignments.ListByPrincipal(ctx, u.ID)
+
+	require.NoError(t, err)
+	require.Len(t, got, 2)
+	gotRoleIDs := []uuid.UUID{got[0].RoleID, got[1].RoleID}
+	require.ElementsMatch(t, []uuid.UUID{role1.ID, role2.ID}, gotRoleIDs)
+}
+
+func TestRoleAssignmentRepository_ListByPrincipal_None(t *testing.T) {
+	assignments := NewRoleAssignmentRepository(testDB)
+
+	got, err := assignments.ListByPrincipal(context.Background(), uuid.New())
+
+	require.NoError(t, err)
+	require.Empty(t, got)
+}

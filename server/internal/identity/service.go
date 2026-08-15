@@ -15,7 +15,8 @@ import (
 	"github.com/google/uuid"
 )
 
-// Service implements the identity module's use cases — signup and the CLI seed's root-user
+// Service implements the identity module's use cases — signup, login (email+password only;
+// other tenant.LoginMethod values have no Service method yet), and the CLI seed's root-user
 // bootstrap. It composes sibling contexts' repository interfaces directly
 // (CODING_STANDARDS.md §3: a Service may depend on sibling contexts' repository ports, never
 // their Services), rather than introducing a separate orchestration layer.
@@ -25,7 +26,7 @@ type Service struct {
 	apps            app.Repository
 	sessions        app.SessionRepository
 	roleAssignments authorization.RoleAssignmentRepository
-	tokens          app.TokenIssuer
+	tokens          app.TokenService
 	tx              TxRunner
 }
 
@@ -36,7 +37,7 @@ func NewService(
 	apps app.Repository,
 	sessions app.SessionRepository,
 	roleAssignments authorization.RoleAssignmentRepository,
-	tokens app.TokenIssuer,
+	tokens app.TokenService,
 	tx TxRunner,
 ) *Service {
 	return &Service{
@@ -50,11 +51,15 @@ func NewService(
 	}
 }
 
-// SignupResult is Signup's outcome — the created User plus its first issued token pair.
-// RefreshToken is the raw value, returned exactly once; only its hash is persisted
-// (app.NewRefreshToken).
-type SignupResult struct {
+// AuthResult is the outcome of any flow that ends in an issued session — Signup and Login
+// alike: the User plus its fresh token pair. RefreshToken is the raw value, returned exactly
+// once; only its hash is persisted (app.NewRefreshToken). AppID is the system app the tokens
+// were issued against — callers that need to key a per-app resource off this login (e.g.
+// AuthHandlers.Login caching effective permissions under appID+userID) don't have to
+// re-resolve it themselves.
+type AuthResult struct {
 	User                  *User
+	AppID                 uuid.UUID
 	AccessToken           string
 	IDToken               string
 	RefreshToken          string
@@ -65,7 +70,7 @@ type SignupResult struct {
 // (TECHNICAL_DESIGN §3.5), and issues its first session + token pair. No actor.Actor —
 // pre-authentication; t is the tenant TenantResolution middleware already resolved (which
 // already excludes a soft-deleted tenant, so Signup doesn't re-check that itself).
-func (s *Service) Signup(ctx context.Context, t *tenant.Tenant, email, password string) (*SignupResult, error) {
+func (s *Service) Signup(ctx context.Context, t *tenant.Tenant, email, password string) (*AuthResult, error) {
 	email = normalizeEmail(email)
 	if !hasEmailPasswordMethod(t) {
 		return nil, apperror.New("identity.login_method_disabled", http.StatusBadRequest)
@@ -149,20 +154,14 @@ func (s *Service) Signup(ctx context.Context, t *tenant.Tenant, email, password 
 		return nil, err
 	}
 
-	claims := app.Claims{Subject: u.ID.String(), Audience: t.ID.String()}
-	accessToken, err := s.tokens.Issue(sysApp, claims, time.Duration(sysApp.AccessTokenTTLSeconds)*time.Second)
-	if err != nil {
-		return nil, err
-	}
-	idClaims := claims
-	idClaims.Extra = map[string]any{"email": email, "email_verified": u.EmailVerified}
-	idToken, err := s.tokens.Issue(sysApp, idClaims, time.Duration(sysApp.IDTokenTTLSeconds)*time.Second)
+	accessToken, idToken, err := s.issueTokenPair(sysApp, t, u)
 	if err != nil {
 		return nil, err
 	}
 
-	return &SignupResult{
+	return &AuthResult{
 		User:                  u,
+		AppID:                 sysApp.ID,
 		AccessToken:           accessToken,
 		IDToken:               idToken,
 		RefreshToken:          rawRefresh,
@@ -170,8 +169,138 @@ func (s *Service) Signup(ctx context.Context, t *tenant.Tenant, email, password 
 	}, nil
 }
 
+// Login authenticates an existing user by email+password against t's default system app and
+// issues a fresh session + token pair — same token-issuance shape as Signup, but never
+// creates a User. The email-not-found, wrong-password, and inactive-account cases all
+// collapse to the same identity.invalid_credentials error so a caller can't distinguish
+// "no such account" from "wrong password" or probe account status.
+func (s *Service) Login(ctx context.Context, t *tenant.Tenant, email, password string) (*AuthResult, error) {
+	email = normalizeEmail(email)
+	if !hasEmailPasswordMethod(t) {
+		return nil, apperror.New("identity.login_method_disabled", http.StatusBadRequest)
+	}
+
+	sysApp, err := s.apps.FindSystemAppByTenant(ctx, t.ID)
+	if err != nil {
+		return nil, err
+	}
+	if sysApp == nil {
+		return nil, apperror.New("identity.system_app_not_found", http.StatusInternalServerError)
+	}
+
+	u, err := s.users.FindByEmail(ctx, t.ID, email)
+	if err != nil {
+		return nil, err
+	}
+
+	// pwd stays nil for an unknown/inactive user — VerifyPassword still runs below, against
+	// dummyPasswordHash, so this path costs the same as a real wrong-password attempt
+	// (see dummyPasswordHash's doc comment).
+	var pwd *Password
+	if u != nil && u.Status == UserStatusActive {
+		pwd, err = s.passwords.FindByUserID(ctx, u.ID)
+		if err != nil {
+			return nil, err
+		}
+	}
+	compareHash := dummyPasswordHash
+	if pwd != nil {
+		compareHash = pwd.PasswordHash
+	}
+	if !VerifyPassword(compareHash, password) || pwd == nil {
+		return nil, apperror.New("identity.invalid_credentials", http.StatusUnauthorized)
+	}
+
+	now := time.Now()
+	rawRefresh, refreshHash, err := app.NewRefreshToken()
+	if err != nil {
+		return nil, err
+	}
+	sess := &app.Session{
+		ID:               uuid.New(),
+		UserID:           u.ID,
+		AppID:            sysApp.ID,
+		Aud:              t.ID.String(),
+		RefreshTokenHash: refreshHash,
+		CreatedAt:        now,
+		LastActiveAt:     now,
+		ExpiresAt:        now.Add(time.Duration(sysApp.RefreshTokenTTLSeconds) * time.Second),
+	}
+	if err := s.sessions.Create(ctx, sess); err != nil {
+		return nil, err
+	}
+
+	accessToken, idToken, err := s.issueTokenPair(sysApp, t, u)
+	if err != nil {
+		return nil, err
+	}
+
+	return &AuthResult{
+		User:                  u,
+		AppID:                 sysApp.ID,
+		AccessToken:           accessToken,
+		IDToken:               idToken,
+		RefreshToken:          rawRefresh,
+		AccessTokenTTLSeconds: sysApp.AccessTokenTTLSeconds,
+	}, nil
+}
+
+// Authenticate verifies tokenString against t's default system app and returns the
+// authenticated principal's UserID plus that system app's own ID (callers use it to key a
+// per-app resource, e.g. the Authorization middleware's permission-cache lookup) — the
+// Service-layer half of the real Authentication middleware
+// (internal/adapters/rest/middleware.go extracts the raw token from the request; this does
+// the actual verification). Every failure — no system app, bad signature, expired token, or
+// a token issued for a different tenant than t — collapses into the same
+// identity.unauthenticated/401, so a caller can't learn which.
+func (s *Service) Authenticate(ctx context.Context, t *tenant.Tenant, tokenString string) (principalID, appID uuid.UUID, err error) {
+	unauthenticated := apperror.New("identity.unauthenticated", http.StatusUnauthorized)
+
+	sysApp, err := s.apps.FindSystemAppByTenant(ctx, t.ID)
+	if err != nil {
+		return uuid.Nil, uuid.Nil, err
+	}
+	if sysApp == nil {
+		return uuid.Nil, uuid.Nil, unauthenticated
+	}
+
+	claims, err := s.tokens.Verify(sysApp, tokenString)
+	if err != nil {
+		return uuid.Nil, uuid.Nil, unauthenticated
+	}
+	// A token's aud is the tenant it was issued for (TECHNICAL_DESIGN §3.5) — without this
+	// check, a token issued while authenticated against one tenant's domain would also
+	// authenticate requests against any other tenant's domain sharing this same principal ID
+	// (subs aren't namespaced by tenant on their own).
+	if claims.Audience != t.ID.String() {
+		return uuid.Nil, uuid.Nil, unauthenticated
+	}
+	principalID, err = uuid.Parse(claims.Subject)
+	if err != nil {
+		return uuid.Nil, uuid.Nil, unauthenticated
+	}
+	return principalID, sysApp.ID, nil
+}
+
+// issueTokenPair issues a fresh access + ID token for u against sysApp/t — the shared final
+// step of Signup and Login, once a session already exists to back them.
+func (s *Service) issueTokenPair(sysApp *app.App, t *tenant.Tenant, u *User) (accessToken, idToken string, err error) {
+	claims := app.Claims{Subject: u.ID.String(), Audience: t.ID.String()}
+	accessToken, err = s.tokens.Issue(sysApp, claims, time.Duration(sysApp.AccessTokenTTLSeconds)*time.Second)
+	if err != nil {
+		return "", "", err
+	}
+	idClaims := claims
+	idClaims.Extra = map[string]any{"email": *u.Email, "email_verified": u.EmailVerified}
+	idToken, err = s.tokens.Issue(sysApp, idClaims, time.Duration(sysApp.IDTokenTTLSeconds)*time.Second)
+	if err != nil {
+		return "", "", err
+	}
+	return accessToken, idToken, nil
+}
+
 // CreateRootUser creates the CLI seed's root superadmin — User + Password only, no
-// session/tokens (they log in via the UI afterward, once a login endpoint exists). Skips
+// session/tokens (they log in via the UI afterward, through Login). Skips
 // Signup's enabled-login-methods check since bootstrap predates tenant configuration.
 // EmailVerified is true — operator-entered via the seed CLI, no verification flow to run
 // anyway. No actor.Actor — mirrors tenant.Service.CreateRootTenant.

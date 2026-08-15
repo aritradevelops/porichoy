@@ -43,6 +43,10 @@ type PasswordRepository interface {
 	// Create persists p as the user's new active password. No actor.Actor — same reasoning
 	// as Repository.Create.
 	Create(ctx context.Context, p *Password) error
+	// FindByUserID returns the user's currently active password (deleted_at IS NULL), or
+	// nil, nil if none exists — backs Login's credential check. No actor.Actor — same
+	// pre-authentication reasoning as Repository.FindByEmail.
+	FindByUserID(ctx context.Context, userID uuid.UUID) (*Password, error)
 }
 
 // HashPassword hashes plain with bcrypt (TECHNICAL_DESIGN §5) — a plain function, not a port:
@@ -64,3 +68,16 @@ func HashPassword(plain string) (string, error) {
 func VerifyPassword(hash, plain string) bool {
 	return bcrypt.CompareHashAndPassword([]byte(hash), []byte(plain)) == nil
 }
+
+// dummyPasswordHash is a valid bcrypt hash of no real password. Login compares against it
+// (instead of short-circuiting) whenever no real Password row exists to check, so the
+// bcrypt cost is paid on every attempt — without this, "no such account" would return
+// measurably faster than "wrong password", letting a timing side-channel reveal which
+// emails are registered.
+var dummyPasswordHash = func() string {
+	hash, err := bcrypt.GenerateFromPassword([]byte("porichoy-login-timing-safety"), bcrypt.DefaultCost)
+	if err != nil {
+		panic(err)
+	}
+	return string(hash)
+}()

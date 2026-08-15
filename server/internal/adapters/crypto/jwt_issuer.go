@@ -19,7 +19,8 @@ import (
 // TECHNICAL_DESIGN §4).
 var ErrUnsupportedSigningAlgorithm = errors.New("crypto: unsupported signing algorithm")
 
-// Issuer implements app.TokenIssuer via lestrrat-go/jwx (CODING_STANDARDS.md §1).
+// Issuer implements app.TokenService (both TokenIssuer and TokenVerifier) via
+// lestrrat-go/jwx (CODING_STANDARDS.md §1).
 type Issuer struct{}
 
 // NewIssuer builds an Issuer. Stateless — HS256 needs no held configuration beyond what each
@@ -29,6 +30,7 @@ func NewIssuer() *Issuer {
 }
 
 var _ app.TokenIssuer = (*Issuer)(nil)
+var _ app.TokenVerifier = (*Issuer)(nil)
 
 // Issue signs claims into a compact JWS using a's own signing config (app.TokenIssuer).
 func (i *Issuer) Issue(a *app.App, claims app.Claims, ttl time.Duration) (string, error) {
@@ -56,4 +58,27 @@ func (i *Issuer) Issue(a *app.App, claims app.Claims, ttl time.Duration) (string
 		return "", err
 	}
 	return string(signed), nil
+}
+
+// Verify parses and validates tokenString against a's own signing config (app.TokenVerifier)
+// — checks the signature, then jwx's default post-parse validation (exp/nbf), mirroring
+// Issue's shape. Any failure (bad signature, expired, malformed) is returned as-is; callers
+// (identity.Service.Authenticate) collapse it to a single opaque "unauthenticated" outcome
+// rather than distinguishing why.
+func (i *Issuer) Verify(a *app.App, tokenString string) (app.Claims, error) {
+	if a.SigningAlgorithm != app.SigningAlgorithmHS256 {
+		return app.Claims{}, ErrUnsupportedSigningAlgorithm
+	}
+
+	tok, err := jwt.Parse([]byte(tokenString), jwt.WithKey(jwa.HS256(), a.SigningKeyConfig))
+	if err != nil {
+		return app.Claims{}, err
+	}
+
+	subject, _ := tok.Subject()
+	var audience string
+	if aud, ok := tok.Audience(); ok && len(aud) > 0 {
+		audience = aud[0]
+	}
+	return app.Claims{Subject: subject, Audience: audience}, nil
 }

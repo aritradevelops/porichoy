@@ -35,4 +35,7 @@ type RoleAssignmentRepository interface {
 	// default_signup_role_id) — CreatedBy is nil in both cases (system auto-assignment,
 	// DATA_MODEL.md `role_assignments.created_by`).
 	Create(ctx context.Context, ra *RoleAssignment) error
+	// ListByPrincipal returns every non-deleted RoleAssignment for principalID — backs
+	// Service.EffectivePermissions.
+	ListByPrincipal(ctx context.Context, principalID uuid.UUID) ([]*RoleAssignment, error)
 }

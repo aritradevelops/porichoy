@@ -14,12 +14,14 @@ import (
 	"os"
 
 	"github.com/aritradevelops/porichoy/server/config"
+	"github.com/aritradevelops/porichoy/server/internal/adapters/cache"
 	"github.com/aritradevelops/porichoy/server/internal/adapters/crypto"
 	"github.com/aritradevelops/porichoy/server/internal/adapters/postgres"
 	"github.com/aritradevelops/porichoy/server/internal/app"
 	"github.com/aritradevelops/porichoy/server/internal/authorization"
 	"github.com/aritradevelops/porichoy/server/internal/identity"
 	"github.com/aritradevelops/porichoy/server/internal/tenant"
+	"github.com/redis/go-redis/v9"
 	"github.com/uptrace/bun"
 )
 
@@ -37,8 +39,9 @@ func rootTenantExists(ctx context.Context, db *bun.DB) (bool, error) {
 // superAdminPermissions/tenantAdminPermissions enumerate every module this codebase
 // currently exposes — AUTHORIZATION_MODEL.md §5 forbids a module-level "*:*@scope" wildcard,
 // each module's action-wildcard has to be granted explicitly. This list is provisional: it
-// grows as new modules ship, and nothing enforces it yet (internal/authorization's runtime
-// permission check doesn't exist). The User role's baseline stays empty (PRD §7.2).
+// grows as new modules ship. The runtime permission check (authorization.Service.ResolveScope,
+// AUTHORIZATION_MODEL.md §2) does enforce it, as of Login populating the permission cache
+// these strings feed. The User role's baseline stays empty (PRD §7.2).
 var (
 	superAdminPermissions = []string{
 		"tenants:*@root",
@@ -82,7 +85,11 @@ func main() {
 		postgres.NewProviderCredentialRepository(db),
 	)
 	appSvc := app.NewService(postgres.NewAppRepository(db))
-	authzSvc := authorization.NewService(postgres.NewRoleRepository(db), postgres.NewRoleAssignmentRepository(db))
+	// redis.NewClient connects lazily; this bootstrap command never calls
+	// authorization.Service's cache-writing methods, so a Redis outage doesn't affect it.
+	redisClient := redis.NewClient(&redis.Options{Addr: cfg.RedisAddr})
+	defer redisClient.Close()
+	authzSvc := authorization.NewService(postgres.NewRoleRepository(db), postgres.NewRoleAssignmentRepository(db), cache.NewRedisCache(redisClient))
 	identitySvc := identity.NewService(
 		postgres.NewUserRepository(db),
 		postgres.NewPasswordRepository(db),
@@ -167,8 +174,9 @@ func main() {
 	fmt.Printf("  System app:  %s (client_id %s)\n", sysApp.Name, sysApp.ClientID)
 	fmt.Printf("  Superadmin:  %s (%s)\n", email, rootUser.ID)
 	fmt.Println()
-	fmt.Println("Next: register a domain for this tenant via POST /api/v1/domains/register")
-	fmt.Println("(no login endpoint exists yet — use the X-Debug-Principal-ID/X-Debug-Scope")
-	fmt.Println("dev headers, per internal/adapters/rest/middleware.go, until real")
-	fmt.Println("authentication lands) so requests can resolve to this tenant at all.")
+	fmt.Println("Next: log in via POST /api/v1/auth/login, then pass the returned access_token")
+	fmt.Println("as \"Authorization: Bearer <token>\" (or an access_token cookie) to register a")
+	fmt.Println("domain for this tenant via POST /api/v1/domains/register — Login already cached")
+	fmt.Println("this superadmin's Super Admin permissions, so it authenticates and authorizes")
+	fmt.Println("for real (AUTHORIZATION_MODEL.md §2).")
 }

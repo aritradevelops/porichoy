@@ -28,6 +28,12 @@ func (m *mockPasswordRepo) Create(ctx context.Context, p *Password) error {
 	return m.Called(ctx, p).Error(0)
 }
 
+func (m *mockPasswordRepo) FindByUserID(ctx context.Context, userID uuid.UUID) (*Password, error) {
+	args := m.Called(ctx, userID)
+	p, _ := args.Get(0).(*Password)
+	return p, args.Error(1)
+}
+
 type mockAppRepo struct{ mock.Mock }
 
 func (m *mockAppRepo) CreateSystem(ctx context.Context, a *app.App) error {
@@ -56,11 +62,23 @@ func (m *mockRoleAssignmentRepo) Create(ctx context.Context, ra *authorization.R
 	return m.Called(ctx, ra).Error(0)
 }
 
+func (m *mockRoleAssignmentRepo) ListByPrincipal(ctx context.Context, principalID uuid.UUID) ([]*authorization.RoleAssignment, error) {
+	args := m.Called(ctx, principalID)
+	assignments, _ := args.Get(0).([]*authorization.RoleAssignment)
+	return assignments, args.Error(1)
+}
+
 type mockTokenIssuer struct{ mock.Mock }
 
 func (m *mockTokenIssuer) Issue(a *app.App, claims app.Claims, ttl time.Duration) (string, error) {
 	args := m.Called(a, claims, ttl)
 	return args.String(0), args.Error(1)
+}
+
+func (m *mockTokenIssuer) Verify(a *app.App, tokenString string) (app.Claims, error) {
+	args := m.Called(a, tokenString)
+	c, _ := args.Get(0).(app.Claims)
+	return c, args.Error(1)
 }
 
 type mockTxRunner struct{}

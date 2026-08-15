@@ -32,6 +32,24 @@ type roleModel struct {
 	DeletedBy *uuid.UUID `bun:"deleted_by,type:uuid"`
 }
 
+func roleFromModel(m *roleModel) *authorization.Role {
+	return &authorization.Role{
+		ID:          m.ID,
+		TenantID:    m.TenantID,
+		AppID:       m.AppID,
+		Name:        m.Name,
+		IsSystem:    m.IsSystem,
+		Permissions: m.Permissions,
+		Policies:    m.Policies,
+		CreatedAt:   m.CreatedAt,
+		UpdatedAt:   m.UpdatedAt,
+		CreatedBy:   m.CreatedBy,
+		UpdatedBy:   m.UpdatedBy,
+		DeletedAt:   m.DeletedAt,
+		DeletedBy:   m.DeletedBy,
+	}
+}
+
 func roleToModel(r *authorization.Role) *roleModel {
 	perms := r.Permissions
 	if perms == nil {
@@ -76,4 +94,26 @@ var _ authorization.RoleRepository = (*RoleRepository)(nil)
 func (r *RoleRepository) CreateSystem(ctx context.Context, role *authorization.Role) error {
 	_, err := dbFromContext(ctx, r.db).NewInsert().Model(roleToModel(role)).Exec(ctx)
 	return err
+}
+
+// FindByIDs returns every non-deleted Role among ids (authorization.RoleRepository) —
+// backs Service.EffectivePermissions. Participates in an ambient transaction if ctx carries
+// one (tx.go).
+func (r *RoleRepository) FindByIDs(ctx context.Context, ids []uuid.UUID) ([]*authorization.Role, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	var models []*roleModel
+	err := dbFromContext(ctx, r.db).NewSelect().Model(&models).
+		Where("id IN (?)", bun.List(ids)).
+		Where("deleted_at IS NULL").
+		Scan(ctx)
+	if err != nil {
+		return nil, err
+	}
+	roles := make([]*authorization.Role, len(models))
+	for i, m := range models {
+		roles[i] = roleFromModel(m)
+	}
+	return roles, nil
 }

@@ -26,6 +26,18 @@ type roleAssignmentModel struct {
 	DeletedBy *uuid.UUID `bun:"deleted_by,type:uuid"`
 }
 
+func roleAssignmentFromModel(m *roleAssignmentModel) *authorization.RoleAssignment {
+	return &authorization.RoleAssignment{
+		ID:          m.ID,
+		PrincipalID: m.PrincipalID,
+		RoleID:      m.RoleID,
+		CreatedAt:   m.CreatedAt,
+		CreatedBy:   m.CreatedBy,
+		DeletedAt:   m.DeletedAt,
+		DeletedBy:   m.DeletedBy,
+	}
+}
+
 func roleAssignmentToModel(ra *authorization.RoleAssignment) *roleAssignmentModel {
 	return &roleAssignmentModel{
 		ID:          ra.ID,
@@ -57,4 +69,23 @@ var _ authorization.RoleAssignmentRepository = (*RoleAssignmentRepository)(nil)
 func (r *RoleAssignmentRepository) Create(ctx context.Context, ra *authorization.RoleAssignment) error {
 	_, err := dbFromContext(ctx, r.db).NewInsert().Model(roleAssignmentToModel(ra)).Exec(ctx)
 	return err
+}
+
+// ListByPrincipal returns every non-deleted RoleAssignment for principalID
+// (authorization.RoleAssignmentRepository) — backs Service.EffectivePermissions.
+// Participates in an ambient transaction if ctx carries one (tx.go).
+func (r *RoleAssignmentRepository) ListByPrincipal(ctx context.Context, principalID uuid.UUID) ([]*authorization.RoleAssignment, error) {
+	var models []*roleAssignmentModel
+	err := dbFromContext(ctx, r.db).NewSelect().Model(&models).
+		Where("principal_id = ?", principalID).
+		Where("deleted_at IS NULL").
+		Scan(ctx)
+	if err != nil {
+		return nil, err
+	}
+	assignments := make([]*authorization.RoleAssignment, len(models))
+	for i, m := range models {
+		assignments[i] = roleAssignmentFromModel(m)
+	}
+	return assignments, nil
 }
