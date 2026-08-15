@@ -48,4 +48,9 @@ type RoleRepository interface {
 	// CreateSystem persists a system-provisioned role (is_system=true) — the CLI seed's
 	// bootstrap path, no actor.Actor since it runs before any principal exists.
 	CreateSystem(ctx context.Context, r *Role) error
+	// FindByIDs returns every non-deleted Role among ids — backs
+	// Service.EffectivePermissions' resolution of a principal's RoleAssignments into the
+	// Roles (and so Permissions) they grant. A ids entry with no matching row (soft-deleted,
+	// or already gone) is simply absent from the result, not an error.
+	FindByIDs(ctx context.Context, ids []uuid.UUID) ([]*Role, error)
 }

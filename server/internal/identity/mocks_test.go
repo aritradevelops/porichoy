@@ -62,6 +62,12 @@ func (m *mockRoleAssignmentRepo) Create(ctx context.Context, ra *authorization.R
 	return m.Called(ctx, ra).Error(0)
 }
 
+func (m *mockRoleAssignmentRepo) ListByPrincipal(ctx context.Context, principalID uuid.UUID) ([]*authorization.RoleAssignment, error) {
+	args := m.Called(ctx, principalID)
+	assignments, _ := args.Get(0).([]*authorization.RoleAssignment)
+	return assignments, args.Error(1)
+}
+
 type mockTokenIssuer struct{ mock.Mock }
 
 func (m *mockTokenIssuer) Issue(a *app.App, claims app.Claims, ttl time.Duration) (string, error) {

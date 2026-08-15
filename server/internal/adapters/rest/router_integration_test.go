@@ -13,9 +13,11 @@ import (
 	"time"
 
 	"github.com/aritradevelops/porichoy/server/internal/actor"
+	"github.com/aritradevelops/porichoy/server/internal/adapters/cache"
 	"github.com/aritradevelops/porichoy/server/internal/adapters/crypto"
 	"github.com/aritradevelops/porichoy/server/internal/adapters/postgres"
 	"github.com/aritradevelops/porichoy/server/internal/app"
+	"github.com/aritradevelops/porichoy/server/internal/authorization"
 	"github.com/aritradevelops/porichoy/server/internal/identity"
 	"github.com/aritradevelops/porichoy/server/internal/tenant"
 	"github.com/google/uuid"
@@ -34,6 +36,16 @@ func newIdentityService() *identity.Service {
 		postgres.NewRoleAssignmentRepository(testDB),
 		crypto.NewIssuer(),
 		postgres.NewTxRunner(testDB),
+	)
+}
+
+// newAuthzService wires a real authorization.Service from Postgres repositories and the
+// shared testRedis container — rest.New always requires one, same as tenantSvc/identitySvc.
+func newAuthzService() *authorization.Service {
+	return authorization.NewService(
+		postgres.NewRoleRepository(testDB),
+		postgres.NewRoleAssignmentRepository(testDB),
+		cache.NewRedisCache(testRedis),
 	)
 }
 
@@ -152,7 +164,7 @@ func doRequest(t *testing.T, app interface {
 
 func TestIntegration_TenantLifecycle(t *testing.T) {
 	svc, tenantID, token := seedTenant(t, "lifecycle.example.com")
-	app := New(svc, newIdentityService())
+	app := New(svc, newIdentityService(), newAuthzService())
 
 	// Create a child tenant under the resolved one.
 	status, env := doRequest(t, app, http.MethodPost, "lifecycle.example.com", "/api/v1/tenants/create",
@@ -193,7 +205,7 @@ func TestIntegration_TenantLifecycle(t *testing.T) {
 
 func TestIntegration_DescendantScope_ReachesDescendantButNotSibling(t *testing.T) {
 	svc, _, _, grandchildID, rootDomain, rootToken := seedTenantTree(t)
-	app := New(svc, newIdentityService())
+	app := New(svc, newIdentityService(), newAuthzService())
 
 	// tree-root's resolved actor (tenant scope) can reach a grandchild it didn't directly
 	// create — AUTHORIZATION_MODEL.md §4's descendant-access rule, driven by the
@@ -213,7 +225,7 @@ func TestIntegration_DescendantScope_ReachesDescendantButNotSibling(t *testing.T
 
 func TestIntegration_DomainsRegister_DescendantScope(t *testing.T) {
 	svc, _, _, grandchildID, rootDomain, rootToken := seedTenantTree(t)
-	app := New(svc, newIdentityService())
+	app := New(svc, newIdentityService(), newAuthzService())
 
 	// tree-root's resolved actor (tenant scope) can register a domain for the grandchild
 	// tenant it didn't directly create — same descendant-access rule as the tenants module,
@@ -243,7 +255,7 @@ func TestIntegration_SignupThenLogin(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	fiberApp := New(svc, newIdentityService())
+	fiberApp := New(svc, newIdentityService(), newAuthzService())
 	email := "login-e2e-" + uuid.NewString() + "@example.com"
 
 	// Sign up, then log in with the same credentials — both public routes, no token needed.

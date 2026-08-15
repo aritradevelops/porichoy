@@ -1,5 +1,6 @@
 # Local dev / quick-start infra. See wiki/TECHNICAL_DESIGN.md §2 for packaging rationale.
-# The app service itself isn't wired up yet — nothing under internal/ is implemented.
+# The app service itself (the Go binary) isn't containerized here yet — `go run ./cmd/server`
+# against this compose file's Postgres/Redis, per config/config.go's defaults.
 services:
   postgres:
     image: postgres:16-alpine

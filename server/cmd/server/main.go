@@ -7,11 +7,14 @@ import (
 	"log"
 
 	"github.com/aritradevelops/porichoy/server/config"
+	"github.com/aritradevelops/porichoy/server/internal/adapters/cache"
 	"github.com/aritradevelops/porichoy/server/internal/adapters/crypto"
 	"github.com/aritradevelops/porichoy/server/internal/adapters/postgres"
 	"github.com/aritradevelops/porichoy/server/internal/adapters/rest"
+	"github.com/aritradevelops/porichoy/server/internal/authorization"
 	"github.com/aritradevelops/porichoy/server/internal/identity"
 	"github.com/aritradevelops/porichoy/server/internal/tenant"
+	"github.com/redis/go-redis/v9"
 )
 
 func main() {
@@ -27,6 +30,11 @@ func main() {
 		log.Fatalf("run migrations: %v", err)
 	}
 
+	// redis.NewClient connects lazily — this succeeds even if Redis isn't reachable yet;
+	// the first cache write (Login) is where an outage would actually surface.
+	redisClient := redis.NewClient(&redis.Options{Addr: cfg.RedisAddr})
+	defer redisClient.Close()
+
 	tenantSvc := tenant.NewService(
 		postgres.NewTenantRepository(db),
 		postgres.NewDomainRepository(db),
@@ -41,8 +49,13 @@ func main() {
 		crypto.NewIssuer(),
 		postgres.NewTxRunner(db),
 	)
+	authzSvc := authorization.NewService(
+		postgres.NewRoleRepository(db),
+		postgres.NewRoleAssignmentRepository(db),
+		cache.NewRedisCache(redisClient),
+	)
 
-	app := rest.New(tenantSvc, identitySvc)
+	app := rest.New(tenantSvc, identitySvc, authzSvc)
 	log.Printf("porichoy: listening on :%s", cfg.Port)
 	log.Fatal(app.Listen(":" + cfg.Port))
 }

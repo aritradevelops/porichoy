@@ -25,14 +25,19 @@ type Config struct {
 	// rooted; override via PORICHOY_MIGRATIONS_DIR for any other run location (e.g. a
 	// container image that copies migrations/ somewhere else).
 	MigrationsDir string
+	// RedisAddr is a host:port pair, passed as-is to redis.Options.Addr
+	// (internal/adapters/cache.NewRedisCache's caller) — the default cache provider
+	// (TECHNICAL_DESIGN.md §2).
+	RedisAddr string
 }
 
-// defaults match server/deploy/docker-compose.yml's local Postgres service, so `go run
+// defaults match server/deploy/docker-compose.yml's local Postgres/Redis services, so `go run
 // ./cmd/server` works against `docker compose up` with zero configuration.
 var defaults = map[string]any{
 	"port":           "8080",
 	"db_dsn":         "postgres://porichoy:porichoy@localhost:5432/porichoy?sslmode=disable",
 	"migrations_dir": "migrations",
+	"redis_addr":     "localhost:6379",
 }
 
 // Load reads defaults, then overlays PORICHOY_-prefixed environment variables —
@@ -59,5 +64,6 @@ func Load() (*Config, error) {
 		Port:          k.String("port"),
 		DBDSN:         k.String("db_dsn"),
 		MigrationsDir: k.String("migrations_dir"),
+		RedisAddr:     k.String("redis_addr"),
 	}, nil
 }

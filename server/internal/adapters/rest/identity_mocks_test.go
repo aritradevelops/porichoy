@@ -12,9 +12,10 @@ import (
 )
 
 // Local mocks of identity.Repository/PasswordRepository and its sibling collaborator ports
-// (app.Repository/SessionRepository/TokenIssuer, authorization.RoleAssignmentRepository) —
-// same reasoning as mocks_test.go's tenant mocks: the internal/identity package's own mocks
-// are unexported and not importable from here.
+// (app.Repository/SessionRepository/TokenIssuer, authorization.RoleRepository/
+// RoleAssignmentRepository/PermissionCache) — same reasoning as mocks_test.go's tenant
+// mocks: the internal/identity and internal/authorization packages' own mocks are unexported
+// and not importable from here.
 
 type mockUserRepo struct{ mock.Mock }
 
@@ -66,6 +67,34 @@ type mockRoleAssignmentRepo struct{ mock.Mock }
 
 func (m *mockRoleAssignmentRepo) Create(ctx context.Context, ra *authorization.RoleAssignment) error {
 	return m.Called(ctx, ra).Error(0)
+}
+
+func (m *mockRoleAssignmentRepo) ListByPrincipal(ctx context.Context, principalID uuid.UUID) ([]*authorization.RoleAssignment, error) {
+	args := m.Called(ctx, principalID)
+	assignments, _ := args.Get(0).([]*authorization.RoleAssignment)
+	return assignments, args.Error(1)
+}
+
+// mockRoleRepo/mockPermissionCache back authorization.Service, which AuthHandlers now also
+// depends on (to cache a freshly logged-in user's permissions) — same
+// not-importable-from-here reasoning as the identity mocks above.
+
+type mockRoleRepo struct{ mock.Mock }
+
+func (m *mockRoleRepo) CreateSystem(ctx context.Context, r *authorization.Role) error {
+	return m.Called(ctx, r).Error(0)
+}
+
+func (m *mockRoleRepo) FindByIDs(ctx context.Context, ids []uuid.UUID) ([]*authorization.Role, error) {
+	args := m.Called(ctx, ids)
+	roles, _ := args.Get(0).([]*authorization.Role)
+	return roles, args.Error(1)
+}
+
+type mockPermissionCache struct{ mock.Mock }
+
+func (m *mockPermissionCache) SetUserPermissions(ctx context.Context, tenantID, userID uuid.UUID, permissions []string, ttl time.Duration) error {
+	return m.Called(ctx, tenantID, userID, permissions, ttl).Error(0)
 }
 
 type mockTokenIssuer struct{ mock.Mock }

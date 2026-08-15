@@ -14,12 +14,14 @@ import (
 	"os"
 
 	"github.com/aritradevelops/porichoy/server/config"
+	"github.com/aritradevelops/porichoy/server/internal/adapters/cache"
 	"github.com/aritradevelops/porichoy/server/internal/adapters/crypto"
 	"github.com/aritradevelops/porichoy/server/internal/adapters/postgres"
 	"github.com/aritradevelops/porichoy/server/internal/app"
 	"github.com/aritradevelops/porichoy/server/internal/authorization"
 	"github.com/aritradevelops/porichoy/server/internal/identity"
 	"github.com/aritradevelops/porichoy/server/internal/tenant"
+	"github.com/redis/go-redis/v9"
 	"github.com/uptrace/bun"
 )
 
@@ -82,7 +84,11 @@ func main() {
 		postgres.NewProviderCredentialRepository(db),
 	)
 	appSvc := app.NewService(postgres.NewAppRepository(db))
-	authzSvc := authorization.NewService(postgres.NewRoleRepository(db), postgres.NewRoleAssignmentRepository(db))
+	// redis.NewClient connects lazily; this bootstrap command never calls
+	// authorization.Service's cache-writing methods, so a Redis outage doesn't affect it.
+	redisClient := redis.NewClient(&redis.Options{Addr: cfg.RedisAddr})
+	defer redisClient.Close()
+	authzSvc := authorization.NewService(postgres.NewRoleRepository(db), postgres.NewRoleAssignmentRepository(db), cache.NewRedisCache(redisClient))
 	identitySvc := identity.NewService(
 		postgres.NewUserRepository(db),
 		postgres.NewPasswordRepository(db),

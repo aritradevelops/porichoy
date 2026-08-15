@@ -95,7 +95,6 @@ func Authorization() fiber.Handler {
 	return func(c *fiber.Ctx) error {
 		t, _ := c.Locals(localsTenant).(*tenant.Tenant)
 		principalID, _ := c.Locals(localsPrincipalID).(uuid.UUID)
-
 		scope := actor.ScopeTenant
 		if h := c.Get("X-Debug-Scope"); h != "" {
 			scope = actor.Scope(h)

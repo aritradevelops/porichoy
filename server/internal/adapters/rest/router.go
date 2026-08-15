@@ -1,6 +1,7 @@
 package rest
 
 import (
+	"github.com/aritradevelops/porichoy/server/internal/authorization"
 	"github.com/aritradevelops/porichoy/server/internal/identity"
 	"github.com/aritradevelops/porichoy/server/internal/tenant"
 	"github.com/gofiber/fiber/v2"
@@ -8,15 +9,15 @@ import (
 
 // New builds the Fiber app and registers every route (CODING_STANDARDS.md §5 — routes are
 // registered explicitly, one per module/action, no dynamic dispatch). Takes tenant.Service/
-// identity.Service directly rather than Postgres-specific types, so this adapter stays
-// swappable (CODING_STANDARDS.md §2) — cmd/server/main.go is the only place that knows
-// Postgres is the backing store.
-func New(tenantSvc *tenant.Service, identitySvc *identity.Service) *fiber.App {
+// identity.Service/authorization.Service directly rather than Postgres-specific types, so
+// this adapter stays swappable (CODING_STANDARDS.md §2) — cmd/server/main.go is the only
+// place that knows Postgres is the backing store.
+func New(tenantSvc *tenant.Service, identitySvc *identity.Service, authzSvc *authorization.Service) *fiber.App {
 	app := fiber.New()
 
 	tenants := NewTenantHandlers(tenantSvc)
 	domains := NewDomainHandlers(tenantSvc)
-	auth := NewAuthHandlers(identitySvc)
+	auth := NewAuthHandlers(identitySvc, authzSvc)
 
 	api := app.Group("/api/v1")
 

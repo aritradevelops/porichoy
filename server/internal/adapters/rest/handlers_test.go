@@ -11,6 +11,7 @@ import (
 
 	"github.com/aritradevelops/porichoy/server/internal/adapters/crypto"
 	"github.com/aritradevelops/porichoy/server/internal/app"
+	"github.com/aritradevelops/porichoy/server/internal/authorization"
 	"github.com/aritradevelops/porichoy/server/internal/identity"
 	"github.com/aritradevelops/porichoy/server/internal/tenant"
 	"github.com/gofiber/fiber/v2"
@@ -38,11 +39,15 @@ type testApp struct {
 	identityApps *mockIdentityAppRepo
 	sessions     *mockSessionRepo
 	assignments  *mockRoleAssignmentRepo
-	// tokens is only populated by signupTestApp (auth_handlers_test.go) — Signup/Login tests
-	// want to mock+assert on Issue directly. newTestApp uses a real crypto.Issuer instead
-	// (see token/principalID below) since its authed-route tests need Authentication's
-	// Verify call to actually succeed, which a bare mock can't do without per-test setup.
+	// tokens/roles/permCache are only populated by signupTestApp (auth_handlers_test.go) —
+	// Signup/Login tests want to mock+assert on Issue/FindByIDs/SetUserPermissions directly.
+	// newTestApp uses a real crypto.Issuer instead (see token/principalID below) since its
+	// authed-route tests need Authentication's Verify call to actually succeed, which a bare
+	// mock can't do without per-test setup; its roles/permCache are unused stand-ins, needed
+	// only because New requires an *authorization.Service to exist at all.
 	tokens      *mockTokenIssuer
+	roles       *mockRoleRepo
+	permCache   *mockPermissionCache
 	tenantID    uuid.UUID
 	principalID uuid.UUID
 	token       string
@@ -84,10 +89,14 @@ func newTestApp(t *testing.T) *testApp {
 	token, err := issuer.Issue(sysApp, app.Claims{Subject: principalID.String(), Audience: tenantID.String()}, time.Hour)
 	require.NoError(t, err)
 
+	roles := &mockRoleRepo{}
+	permCache := &mockPermissionCache{}
+
 	tenantSvc := tenant.NewService(tenants, domains, creds)
 	identitySvc := identity.NewService(users, passwords, identityApps, sessions, assignments, issuer, noopTxRunner{})
+	authzSvc := authorization.NewService(roles, assignments, permCache)
 	return &testApp{
-		app:          New(tenantSvc, identitySvc),
+		app:          New(tenantSvc, identitySvc, authzSvc),
 		tenants:      tenants,
 		domains:      domains,
 		creds:        creds,
@@ -96,6 +105,8 @@ func newTestApp(t *testing.T) *testApp {
 		identityApps: identityApps,
 		sessions:     sessions,
 		assignments:  assignments,
+		roles:        roles,
+		permCache:    permCache,
 		tenantID:     tenantID,
 		principalID:  principalID,
 		token:        token,
