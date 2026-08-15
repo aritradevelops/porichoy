@@ -41,7 +41,7 @@ func signupTestApp(t *testing.T, loginMethods ...tenant.LoginMethod) *testApp {
 	tenants.On("FindByID", mock.Anything, tenantID).
 		Return(&tenant.Tenant{ID: tenantID, Name: "Acme", EnabledLoginMethods: loginMethods}, nil)
 	assignments.On("ListByPrincipal", mock.Anything, mock.Anything).Return(nil, nil).Maybe()
-	permCache.On("SetUserPermissions", mock.Anything, tenantID, mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
+	permCache.On("SetUserPermissions", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
 
 	tenantSvc := tenant.NewService(tenants, domains, creds)
 	identitySvc := identity.NewService(users, passwords, identityApps, sessions, assignments, tokens, noopTxRunner{})
@@ -221,7 +221,7 @@ func TestAuth_Login_CachesEffectivePermissions(t *testing.T) {
 	ta.roles.On("FindByIDs", mock.Anything, []uuid.UUID{roleID}).Return([]*authorization.Role{
 		{ID: roleID, Permissions: []string{"tenants:*@tenant"}},
 	}, nil)
-	ta.permCache.On("SetUserPermissions", mock.Anything, ta.tenantID, u.ID, []string{"tenants:*@tenant"}, 900*time.Second).
+	ta.permCache.On("SetUserPermissions", mock.Anything, sysApp.ID, u.ID, []string{"tenants:*@tenant"}, 900*time.Second).
 		Return(nil)
 
 	status, env := ta.do(t, http.MethodPost, "/api/v1/auth/login",
@@ -250,7 +250,7 @@ func TestAuth_Login_SucceedsEvenWhenCacheWriteFails(t *testing.T) {
 	// (the "best-effort" decision: nothing reads this cache yet, so a Redis outage shouldn't
 	// take login down with it).
 	ta.permCache.ExpectedCalls = nil
-	ta.permCache.On("SetUserPermissions", mock.Anything, ta.tenantID, u.ID, mock.Anything, mock.Anything).
+	ta.permCache.On("SetUserPermissions", mock.Anything, sysApp.ID, u.ID, mock.Anything, mock.Anything).
 		Return(errors.New("redis: connection refused"))
 
 	status, env := ta.do(t, http.MethodPost, "/api/v1/auth/login",

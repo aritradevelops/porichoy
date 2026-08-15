@@ -52,16 +52,21 @@ func newAuthzService() *authorization.Service {
 // mustIssueTestToken creates tenantID's system app (every tenant this file seeds needs
 // exactly one, per the idx_apps_tenant_system unique index — callers that need the app
 // itself, e.g. to enable a login method against it, should create their own tenant instead
-// of going through this) and mints a valid access token for a fresh random principal against
-// it — every authenticated-route test needs one, now that Authentication verifies real
-// signatures (internal/identity.Service.Authenticate) instead of trusting a debug header.
+// of going through this), mints a valid access token for a fresh random principal against
+// it, and caches that principal's permissions (testTenantScopePermissions, defined in
+// handlers_test.go and shared across this package's test files) in the shared testRedis
+// container — Authenticate now does a real signature check
+// (internal/identity.Service.Authenticate) and a real cache-backed permission check
+// (authorization.Service.ResolveScope), replacing the former debug-header stub entirely.
 func mustIssueTestToken(t *testing.T, tenantID uuid.UUID) string {
 	t.Helper()
 	ctx := context.Background()
 	sysApp, err := app.NewService(postgres.NewAppRepository(testDB)).CreateSystemApp(ctx, tenantID, "System")
 	require.NoError(t, err)
-	token, err := crypto.NewIssuer().Issue(sysApp, app.Claims{Subject: uuid.NewString(), Audience: tenantID.String()}, time.Hour)
+	principalID := uuid.New()
+	token, err := crypto.NewIssuer().Issue(sysApp, app.Claims{Subject: principalID.String(), Audience: tenantID.String()}, time.Hour)
 	require.NoError(t, err)
+	require.NoError(t, cache.NewRedisCache(testRedis).SetUserPermissions(ctx, sysApp.ID, principalID, testTenantScopePermissions, time.Hour))
 	return token
 }
 
@@ -279,11 +284,15 @@ func TestIntegration_SignupThenLogin(t *testing.T) {
 	require.Equal(t, http.StatusUnauthorized, status)
 	require.Equal(t, "identity.invalid_credentials", env.Error.Key)
 
-	// The freshly logged-in user's own access token authenticates a real, authed route —
-	// proof the whole Login -> Authentication loop actually closes end-to-end.
+	// The freshly logged-in user's own access token authenticates against a real authed
+	// route — proof Login's issued token and Authenticate's verification of it actually
+	// agree end-to-end. This ordinary signed-up user was never granted a role, so Login
+	// cached an empty permission set for them: Authorize correctly still denies the request
+	// (403, not 401) — proof the cache-backed permission check Login populated is the one
+	// actually being read, not a stub that would have let anyone through.
 	status, env = doRequest(t, fiberApp, http.MethodGet, domain, "/api/v1/tenants/get/"+tenantID.String(), nil, authHeader(loginToken))
-	require.Equal(t, http.StatusOK, status)
-	require.Nil(t, env.Error)
+	require.Equal(t, http.StatusForbidden, status)
+	require.Equal(t, "authorization.forbidden", env.Error.Key)
 }
 
 func boolPtr(b bool) *bool { return &b }

@@ -34,6 +34,12 @@ func (m *mockRoleAssignmentRepo) ListByPrincipal(ctx context.Context, principalI
 
 type mockPermissionCache struct{ mock.Mock }
 
-func (m *mockPermissionCache) SetUserPermissions(ctx context.Context, tenantID, userID uuid.UUID, permissions []string, ttl time.Duration) error {
-	return m.Called(ctx, tenantID, userID, permissions, ttl).Error(0)
+func (m *mockPermissionCache) SetUserPermissions(ctx context.Context, appID, userID uuid.UUID, permissions []string, ttl time.Duration) error {
+	return m.Called(ctx, appID, userID, permissions, ttl).Error(0)
+}
+
+func (m *mockPermissionCache) GetUserPermissions(ctx context.Context, appID, userID uuid.UUID) ([]byte, error) {
+	args := m.Called(ctx, appID, userID)
+	raw, _ := args.Get(0).([]byte)
+	return raw, args.Error(1)
 }

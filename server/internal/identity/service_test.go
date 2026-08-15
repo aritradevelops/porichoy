@@ -265,10 +265,11 @@ func TestService_Authenticate_OK(t *testing.T) {
 	tokens.On("Verify", sysApp, "a-valid-token").
 		Return(app.Claims{Subject: principalID.String(), Audience: tt.ID.String()}, nil)
 
-	got, err := svc.Authenticate(context.Background(), tt, "a-valid-token")
+	gotPrincipalID, gotAppID, err := svc.Authenticate(context.Background(), tt, "a-valid-token")
 
 	require.NoError(t, err)
-	require.Equal(t, principalID, got)
+	require.Equal(t, principalID, gotPrincipalID)
+	require.Equal(t, sysApp.ID, gotAppID)
 }
 
 func TestService_Authenticate_BadSignature(t *testing.T) {
@@ -279,7 +280,7 @@ func TestService_Authenticate_BadSignature(t *testing.T) {
 	apps.On("FindSystemAppByTenant", mock.Anything, tt.ID).Return(sysApp, nil)
 	tokens.On("Verify", sysApp, "forged-token").Return(app.Claims{}, errors.New("signature verification failed"))
 
-	_, err := svc.Authenticate(context.Background(), tt, "forged-token")
+	_, _, err := svc.Authenticate(context.Background(), tt, "forged-token")
 
 	assertAppErrorKey(t, err, "identity.unauthenticated")
 }
@@ -293,7 +294,7 @@ func TestService_Authenticate_TokenForAnotherTenant(t *testing.T) {
 	tokens.On("Verify", sysApp, "cross-tenant-token").
 		Return(app.Claims{Subject: uuid.NewString(), Audience: uuid.NewString()}, nil)
 
-	_, err := svc.Authenticate(context.Background(), tt, "cross-tenant-token")
+	_, _, err := svc.Authenticate(context.Background(), tt, "cross-tenant-token")
 
 	assertAppErrorKey(t, err, "identity.unauthenticated")
 }
@@ -303,7 +304,7 @@ func TestService_Authenticate_SystemAppNotFound(t *testing.T) {
 	tt := &tenant.Tenant{ID: uuid.New()}
 	apps.On("FindSystemAppByTenant", mock.Anything, tt.ID).Return(nil, nil)
 
-	_, err := svc.Authenticate(context.Background(), tt, "any-token")
+	_, _, err := svc.Authenticate(context.Background(), tt, "any-token")
 
 	assertAppErrorKey(t, err, "identity.unauthenticated")
 }

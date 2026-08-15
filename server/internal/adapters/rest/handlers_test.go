@@ -22,13 +22,22 @@ import (
 
 const testHost = "acme.example.com"
 
+// testTenantScopePermissions is what a tenant admin would have cached at Login — granted by
+// default to newTestApp's fixture principal so every existing authed-route test keeps
+// exercising the same tenant-scope behavior it did before Authenticate started doing a real
+// cache-backed permission check (previously the X-Debug-Scope stub always defaulted to
+// actor.ScopeTenant). Mirrors cmd/seed/main.go's tenantAdminPermissions.
+var testTenantScopePermissions = []string{"tenants:*@tenant", "domains:*@tenant", "provider_credentials:*@tenant"}
+
 // testApp wires a real Fiber app (rest.New) over mocked repositories, so every request
 // exercises the actual middleware chain and handler code — only the DB is faked, matching
 // how internal/tenant/service_test.go isolates Service from Postgres. tokens is a real
-// crypto.Issuer, not a mock: Authentication now verifies a real signature
+// crypto.Issuer, not a mock: Authenticate now verifies a real signature
 // (internal/identity.Service.Authenticate), and every authed-route test needs that to
 // succeed without restating JWT-mocking boilerplate — do() attaches the pre-minted valid
-// token automatically.
+// token automatically. permCache is likewise wired with a real, tenant-scope permission set
+// for principalID, since Authenticate now also does a real cache-backed permission check
+// (authzSvc.ResolveScope) rather than trusting a debug header.
 type testApp struct {
 	app          *fiber.App
 	tenants      *mockTenantRepo
@@ -39,25 +48,26 @@ type testApp struct {
 	identityApps *mockIdentityAppRepo
 	sessions     *mockSessionRepo
 	assignments  *mockRoleAssignmentRepo
-	// tokens/roles/permCache are only populated by signupTestApp (auth_handlers_test.go) —
-	// Signup/Login tests want to mock+assert on Issue/FindByIDs/SetUserPermissions directly.
-	// newTestApp uses a real crypto.Issuer instead (see token/principalID below) since its
-	// authed-route tests need Authentication's Verify call to actually succeed, which a bare
-	// mock can't do without per-test setup; its roles/permCache are unused stand-ins, needed
-	// only because New requires an *authorization.Service to exist at all.
+	// tokens/roles are only populated by signupTestApp (auth_handlers_test.go) — Signup/
+	// Login tests want to mock+assert on Issue/FindByIDs directly. newTestApp uses a real
+	// crypto.Issuer instead (see token/principalID below) since its authed-route tests need
+	// Authenticate's Verify call to actually succeed, which a bare mock can't do without
+	// per-test setup; its roles is an unused stand-in, needed only because New requires an
+	// *authorization.Service to exist at all.
 	tokens      *mockTokenIssuer
 	roles       *mockRoleRepo
 	permCache   *mockPermissionCache
+	appID       uuid.UUID
 	tenantID    uuid.UUID
 	principalID uuid.UUID
 	token       string
 }
 
 // newTestApp builds a testApp with testHost already resolving to a fixture tenant
-// (tenantID) with its own system app, plus a valid access token for principalID against
-// that tenant — the things every authenticated-route test needs, since
-// TenantResolution+Authentication+Authorization all run on every request in the "authed"
-// group.
+// (tenantID) with its own system app, a valid access token for principalID against that
+// tenant, and principalID's cached permissions (testTenantScopePermissions) — the things
+// every authenticated-route test needs, since TenantResolution+Authenticate both run on
+// every request in the "authed" group.
 func newTestApp(t *testing.T) *testApp {
 	t.Helper()
 	tenants := &mockTenantRepo{}
@@ -91,6 +101,9 @@ func newTestApp(t *testing.T) *testApp {
 
 	roles := &mockRoleRepo{}
 	permCache := &mockPermissionCache{}
+	permissionsJSON, err := json.Marshal(testTenantScopePermissions)
+	require.NoError(t, err)
+	permCache.On("GetUserPermissions", mock.Anything, sysApp.ID, principalID).Return(permissionsJSON, nil)
 
 	tenantSvc := tenant.NewService(tenants, domains, creds)
 	identitySvc := identity.NewService(users, passwords, identityApps, sessions, assignments, issuer, noopTxRunner{})
@@ -107,6 +120,7 @@ func newTestApp(t *testing.T) *testApp {
 		assignments:  assignments,
 		roles:        roles,
 		permCache:    permCache,
+		appID:        sysApp.ID,
 		tenantID:     tenantID,
 		principalID:  principalID,
 		token:        token,
@@ -211,6 +225,35 @@ func TestAuthentication_TokenFromCookie(t *testing.T) {
 	defer resp.Body.Close()
 
 	require.Equal(t, http.StatusOK, resp.StatusCode)
+}
+
+func TestAuthorization_NoCachedPermissions(t *testing.T) {
+	ta := newTestApp(t)
+	// Overrides newTestApp's default granted-permissions mock with a cache miss — the
+	// principal authenticated fine, but nothing was ever cached for them (never logged in,
+	// or the entry expired).
+	ta.permCache.ExpectedCalls = nil
+	ta.permCache.On("GetUserPermissions", mock.Anything, ta.appID, ta.principalID).Return(nil, nil)
+
+	status, env := ta.do(t, http.MethodGet, "/api/v1/tenants/get/"+ta.tenantID.String(), nil, nil)
+
+	require.Equal(t, http.StatusForbidden, status)
+	require.Equal(t, "authorization.forbidden", env.Error.Key)
+}
+
+func TestAuthorization_NoMatchingPermission(t *testing.T) {
+	ta := newTestApp(t)
+	// Cached permissions exist, but none of them are for the "tenants" module this route
+	// exercises — proves the module+action match, not just "has some cache entry".
+	ta.permCache.ExpectedCalls = nil
+	permissionsJSON, err := json.Marshal([]string{"domains:*@root"})
+	require.NoError(t, err)
+	ta.permCache.On("GetUserPermissions", mock.Anything, ta.appID, ta.principalID).Return(permissionsJSON, nil)
+
+	status, env := ta.do(t, http.MethodGet, "/api/v1/tenants/get/"+ta.tenantID.String(), nil, nil)
+
+	require.Equal(t, http.StatusForbidden, status)
+	require.Equal(t, "authorization.forbidden", env.Error.Key)
 }
 
 func TestTenants_Create_OK(t *testing.T) {

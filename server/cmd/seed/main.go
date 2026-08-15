@@ -39,8 +39,9 @@ func rootTenantExists(ctx context.Context, db *bun.DB) (bool, error) {
 // superAdminPermissions/tenantAdminPermissions enumerate every module this codebase
 // currently exposes — AUTHORIZATION_MODEL.md §5 forbids a module-level "*:*@scope" wildcard,
 // each module's action-wildcard has to be granted explicitly. This list is provisional: it
-// grows as new modules ship, and nothing enforces it yet (internal/authorization's runtime
-// permission check doesn't exist). The User role's baseline stays empty (PRD §7.2).
+// grows as new modules ship. The runtime permission check (authorization.Service.ResolveScope,
+// AUTHORIZATION_MODEL.md §2) does enforce it, as of Login populating the permission cache
+// these strings feed. The User role's baseline stays empty (PRD §7.2).
 var (
 	superAdminPermissions = []string{
 		"tenants:*@root",
@@ -175,7 +176,7 @@ func main() {
 	fmt.Println()
 	fmt.Println("Next: log in via POST /api/v1/auth/login, then pass the returned access_token")
 	fmt.Println("as \"Authorization: Bearer <token>\" (or an access_token cookie) to register a")
-	fmt.Println("domain for this tenant via POST /api/v1/domains/register. Authorization itself")
-	fmt.Println("is still a stub — pass X-Debug-Scope to exercise a scope other than \"tenant\",")
-	fmt.Println("per internal/adapters/rest/middleware.go, until real permission checks land.")
+	fmt.Println("domain for this tenant via POST /api/v1/domains/register — Login already cached")
+	fmt.Println("this superadmin's Super Admin permissions, so it authenticates and authorizes")
+	fmt.Println("for real (AUTHORIZATION_MODEL.md §2).")
 }

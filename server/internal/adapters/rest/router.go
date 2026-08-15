@@ -21,22 +21,22 @@ func New(tenantSvc *tenant.Service, identitySvc *identity.Service, authzSvc *aut
 
 	api := app.Group("/api/v1")
 
-	// Public/pre-authentication routes — don't run the TenantResolution/Authentication/
-	// Authorization chain (CODING_STANDARDS.md §5's own example of this: "tenant
-	// resolution itself"). domains/resolve is the same shape of route: nothing to resolve
-	// a tenant *from* yet, since the caller is asking which tenant a domain belongs to in
-	// the first place.
+	// Public/pre-authentication routes — don't run the TenantResolution/Authenticate chain
+	// (CODING_STANDARDS.md §5's own example of this: "tenant resolution itself").
+	// domains/resolve is the same shape of route: nothing to resolve a tenant *from* yet,
+	// since the caller is asking which tenant a domain belongs to in the first place.
 	api.Get("/domains/resolve", domains.Resolve)
 
 	// Tenant-resolved but not-yet-authenticated routes — signup/login are how a caller
-	// *becomes* authenticated, so only TenantResolution runs; Authentication/Authorization
-	// have nothing to check yet (no principal exists until one of these produces one).
+	// *becomes* authenticated, so only TenantResolution runs; Authenticate has nothing to
+	// check yet (no principal exists until one of these produces one).
 	public := api.Group("", TenantResolution(tenantSvc))
 	public.Post("/auth/signup", auth.Signup)
 	public.Post("/auth/login", auth.Login)
 
-	// Authenticated/authorized routes — full three-stage chain (CODING_STANDARDS.md §5).
-	authed := api.Group("", TenantResolution(tenantSvc), Authentication(identitySvc), Authorization())
+	// Authenticated/authorized routes — TenantResolution, then the merged
+	// authentication+authorization stage (CODING_STANDARDS.md §5, AUTHORIZATION_MODEL.md §2).
+	authed := api.Group("", TenantResolution(tenantSvc), Authenticate(identitySvc, authzSvc))
 	authed.Post("/tenants/create", tenants.Create)
 	authed.Get("/tenants/list", tenants.List)
 	authed.Get("/tenants/get/:id", tenants.Get)

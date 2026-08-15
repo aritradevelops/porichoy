@@ -6,6 +6,7 @@ package cache
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -27,16 +28,18 @@ func NewRedisCache(client *redis.Client) *RedisCache {
 
 var _ authorization.PermissionCache = (*RedisCache)(nil)
 
-// permissionsKey namespaces a principal's cached permissions by tenant — permission strings
-// are meaningless outside the tenant they were resolved within (AUTHORIZATION_MODEL.md §3),
-// so the same userID under two different tenants gets two independent entries.
-func permissionsKey(tenantID, userID uuid.UUID) string {
-	return fmt.Sprintf("permissions:%s:%s", tenantID, userID)
+// permissionsKey namespaces a principal's cached permissions by app — permission strings are
+// meaningless outside the app they were resolved within (AUTHORIZATION_MODEL.md §3, an app
+// owns its own role catalog), so the same userID under two different apps gets two
+// independent entries. userID-then-appID ordering matches this project's original Node
+// implementation (application/src/middlewares/auth.middleware.ts's `permissions_${user.id}_${user.app_id}`).
+func permissionsKey(appID, userID uuid.UUID) string {
+	return fmt.Sprintf("permissions_%s_%s", userID, appID)
 }
 
 // SetUserPermissions stores permissions as a single JSON-array-stringified value under
-// tenantID+userID (authorization.PermissionCache), expiring after ttl.
-func (c *RedisCache) SetUserPermissions(ctx context.Context, tenantID, userID uuid.UUID, permissions []string, ttl time.Duration) error {
+// appID+userID (authorization.PermissionCache), expiring after ttl.
+func (c *RedisCache) SetUserPermissions(ctx context.Context, appID, userID uuid.UUID, permissions []string, ttl time.Duration) error {
 	if permissions == nil {
 		permissions = []string{}
 	}
@@ -44,5 +47,18 @@ func (c *RedisCache) SetUserPermissions(ctx context.Context, tenantID, userID uu
 	if err != nil {
 		return err
 	}
-	return c.client.Set(ctx, permissionsKey(tenantID, userID), encoded, ttl).Err()
+	return c.client.Set(ctx, permissionsKey(appID, userID), encoded, ttl).Err()
+}
+
+// GetUserPermissions returns the raw JSON-array-encoded permissions previously stored for
+// appID+userID (authorization.PermissionCache), or nil, nil on a cache miss.
+func (c *RedisCache) GetUserPermissions(ctx context.Context, appID, userID uuid.UUID) ([]byte, error) {
+	raw, err := c.client.Get(ctx, permissionsKey(appID, userID)).Bytes()
+	if errors.Is(err, redis.Nil) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return raw, nil
 }

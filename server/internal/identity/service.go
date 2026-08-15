@@ -53,9 +53,13 @@ func NewService(
 
 // AuthResult is the outcome of any flow that ends in an issued session — Signup and Login
 // alike: the User plus its fresh token pair. RefreshToken is the raw value, returned exactly
-// once; only its hash is persisted (app.NewRefreshToken).
+// once; only its hash is persisted (app.NewRefreshToken). AppID is the system app the tokens
+// were issued against — callers that need to key a per-app resource off this login (e.g.
+// AuthHandlers.Login caching effective permissions under appID+userID) don't have to
+// re-resolve it themselves.
 type AuthResult struct {
 	User                  *User
+	AppID                 uuid.UUID
 	AccessToken           string
 	IDToken               string
 	RefreshToken          string
@@ -157,6 +161,7 @@ func (s *Service) Signup(ctx context.Context, t *tenant.Tenant, email, password 
 
 	return &AuthResult{
 		User:                  u,
+		AppID:                 sysApp.ID,
 		AccessToken:           accessToken,
 		IDToken:               idToken,
 		RefreshToken:          rawRefresh,
@@ -232,6 +237,7 @@ func (s *Service) Login(ctx context.Context, t *tenant.Tenant, email, password s
 
 	return &AuthResult{
 		User:                  u,
+		AppID:                 sysApp.ID,
 		AccessToken:           accessToken,
 		IDToken:               idToken,
 		RefreshToken:          rawRefresh,
@@ -240,38 +246,40 @@ func (s *Service) Login(ctx context.Context, t *tenant.Tenant, email, password s
 }
 
 // Authenticate verifies tokenString against t's default system app and returns the
-// authenticated principal's UserID — the Service-layer half of the real Authentication
-// middleware (internal/adapters/rest/middleware.go extracts the raw token from the request;
-// this does the actual verification). Every failure — no system app, bad signature, expired
-// token, or a token issued for a different tenant than t — collapses into the same
+// authenticated principal's UserID plus that system app's own ID (callers use it to key a
+// per-app resource, e.g. the Authorization middleware's permission-cache lookup) — the
+// Service-layer half of the real Authentication middleware
+// (internal/adapters/rest/middleware.go extracts the raw token from the request; this does
+// the actual verification). Every failure — no system app, bad signature, expired token, or
+// a token issued for a different tenant than t — collapses into the same
 // identity.unauthenticated/401, so a caller can't learn which.
-func (s *Service) Authenticate(ctx context.Context, t *tenant.Tenant, tokenString string) (uuid.UUID, error) {
+func (s *Service) Authenticate(ctx context.Context, t *tenant.Tenant, tokenString string) (principalID, appID uuid.UUID, err error) {
 	unauthenticated := apperror.New("identity.unauthenticated", http.StatusUnauthorized)
 
 	sysApp, err := s.apps.FindSystemAppByTenant(ctx, t.ID)
 	if err != nil {
-		return uuid.Nil, err
+		return uuid.Nil, uuid.Nil, err
 	}
 	if sysApp == nil {
-		return uuid.Nil, unauthenticated
+		return uuid.Nil, uuid.Nil, unauthenticated
 	}
 
 	claims, err := s.tokens.Verify(sysApp, tokenString)
 	if err != nil {
-		return uuid.Nil, unauthenticated
+		return uuid.Nil, uuid.Nil, unauthenticated
 	}
 	// A token's aud is the tenant it was issued for (TECHNICAL_DESIGN §3.5) — without this
 	// check, a token issued while authenticated against one tenant's domain would also
 	// authenticate requests against any other tenant's domain sharing this same principal ID
 	// (subs aren't namespaced by tenant on their own).
 	if claims.Audience != t.ID.String() {
-		return uuid.Nil, unauthenticated
+		return uuid.Nil, uuid.Nil, unauthenticated
 	}
-	principalID, err := uuid.Parse(claims.Subject)
+	principalID, err = uuid.Parse(claims.Subject)
 	if err != nil {
-		return uuid.Nil, unauthenticated
+		return uuid.Nil, uuid.Nil, unauthenticated
 	}
-	return principalID, nil
+	return principalID, sysApp.ID, nil
 }
 
 // issueTokenPair issues a fresh access + ID token for u against sysApp/t — the shared final

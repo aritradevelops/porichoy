@@ -2,16 +2,21 @@ package authorization
 
 import (
 	"context"
+	"encoding/json"
+	"net/http"
+	"strings"
 	"time"
 
+	"github.com/aritradevelops/porichoy/server/internal/actor"
+	"github.com/aritradevelops/porichoy/server/internal/apperror"
 	"github.com/google/uuid"
 )
 
 // Service implements the authorization module's bootstrap use cases — role and
-// role-assignment creation for the CLI seed command — plus resolving and caching a
-// principal's effective permissions at login. It is not the runtime authorization engine
-// (AUTHORIZATION_MODEL.md §2-3) — that doesn't exist yet; nothing reads the cache this
-// populates.
+// role-assignment creation for the CLI seed command — resolving/caching a principal's
+// effective permissions at login, and the runtime permission check itself
+// (AUTHORIZATION_MODEL.md §2), which the real Authenticate middleware
+// (internal/adapters/rest) calls on every authed request.
 type Service struct {
 	roles       RoleRepository
 	assignments RoleAssignmentRepository
@@ -97,13 +102,66 @@ func (s *Service) EffectivePermissions(ctx context.Context, principalID uuid.UUI
 }
 
 // CacheUserPermissions resolves userID's EffectivePermissions and materializes them in the
-// cache (TECHNICAL_DESIGN.md §6) under tenantID+userID, expiring after ttl. Called once at
+// cache (TECHNICAL_DESIGN.md §6) under appID+userID, expiring after ttl. Called once at
 // Login (internal/adapters/rest.AuthHandlers.Login) — not on every request, and not yet on
 // every role/assignment change.
-func (s *Service) CacheUserPermissions(ctx context.Context, tenantID, userID uuid.UUID, ttl time.Duration) error {
+func (s *Service) CacheUserPermissions(ctx context.Context, appID, userID uuid.UUID, ttl time.Duration) error {
 	permissions, err := s.EffectivePermissions(ctx, userID)
 	if err != nil {
 		return err
 	}
-	return s.cache.SetUserPermissions(ctx, tenantID, userID, permissions, ttl)
+	return s.cache.SetUserPermissions(ctx, appID, userID, permissions, ttl)
+}
+
+// ErrForbidden is returned by ResolveScope when no cached permission matches — either no
+// cache entry exists at all (never logged in, or it expired), or one exists but nothing in
+// it matches this module+action at any scope.
+var ErrForbidden = apperror.New("authorization.forbidden", http.StatusForbidden)
+
+// ResolveScope is the runtime permission check (AUTHORIZATION_MODEL.md §2): looks up
+// userID's cached permissions for appID, finds every one matching
+// {module}:{action}@* — including a {module}:*@* wildcard action — and returns the broadest
+// matching scope (§3). Returns ErrForbidden if the cache has nothing for this principal, or
+// nothing in it matches.
+func (s *Service) ResolveScope(ctx context.Context, appID, userID uuid.UUID, module, action string) (actor.Scope, error) {
+	raw, err := s.cache.GetUserPermissions(ctx, appID, userID)
+	if err != nil {
+		return "", err
+	}
+	if raw == nil {
+		return "", ErrForbidden
+	}
+
+	var permissions []string
+	if err := json.Unmarshal(raw, &permissions); err != nil {
+		return "", err
+	}
+
+	var best actor.Scope
+	matched := false
+	for _, p := range permissions {
+		permModule, permAction, scope, ok := parsePermission(p)
+		if !ok || permModule != module || (permAction != action && permAction != "*") {
+			continue
+		}
+		if !matched || actor.Scope(scope).AtLeast(best) {
+			best = actor.Scope(scope)
+			matched = true
+		}
+	}
+	if !matched {
+		return "", ErrForbidden
+	}
+	return best, nil
+}
+
+// parsePermission splits a "module:action@scope" permission string into its three parts —
+// ok is false if either separator is missing.
+func parsePermission(p string) (module, action, scope string, ok bool) {
+	moduleAction, scope, ok := strings.Cut(p, "@")
+	if !ok {
+		return "", "", "", false
+	}
+	module, action, ok = strings.Cut(moduleAction, ":")
+	return module, action, scope, ok
 }

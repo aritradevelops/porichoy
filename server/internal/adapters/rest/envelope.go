@@ -42,6 +42,7 @@ var messages = map[string]string{
 	"identity.password_too_long":        "Password must be 72 characters or fewer.",
 	"identity.invalid_credentials":      "Incorrect email or password.",
 	"identity.unauthenticated":          "You must be signed in to do that.",
+	"authorization.forbidden":           "You don't have permission to do that.",
 	"validation.invalid_body":           "The request body is malformed.",
 	"validation.failed":                 "The request failed validation.",
 	"internal.error":                    "Something went wrong. Please try again.",

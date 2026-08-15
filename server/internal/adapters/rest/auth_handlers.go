@@ -56,8 +56,8 @@ func toAuthResponse(r *identity.AuthResult) authResponse {
 }
 
 // Signup handles POST /api/v1/auth/signup — registered behind TenantResolution only (no
-// Authentication/Authorization: there's no caller to authenticate yet, this endpoint creates
-// one), same precedent as domains/resolve.
+// Authenticate: there's no caller to authenticate yet, this endpoint creates one), same
+// precedent as domains/resolve.
 func (h *AuthHandlers) Signup(c *fiber.Ctx) error {
 	var req signupRequest
 	if err := bindAndValidate(c, &req); err != nil {
@@ -80,7 +80,7 @@ type loginRequest struct {
 
 // Login handles POST /api/v1/auth/login — same "TenantResolution only" reasoning as Signup:
 // this endpoint is how a caller *becomes* authenticated, so there's no principal yet to run
-// Authentication/Authorization against.
+// Authenticate against.
 func (h *AuthHandlers) Login(c *fiber.Ctx) error {
 	var req loginRequest
 	if err := bindAndValidate(c, &req); err != nil {
@@ -94,11 +94,13 @@ func (h *AuthHandlers) Login(c *fiber.Ctx) error {
 	}
 
 	// Materializes the user's effective permissions in the cache (TECHNICAL_DESIGN.md §6),
-	// TTL matched to the access token this same response carries so the two expire together.
-	// Best-effort: nothing reads this cache yet (Authorization is still a stub), so a cache
-	// outage shouldn't fail a login that was otherwise entirely valid.
+	// keyed by the same AppID Authenticate resolves at request time, TTL matched to the
+	// access token this same response carries so the two expire together. Best-effort: a
+	// cache-write failure is logged but doesn't fail an otherwise-valid login — the tradeoff
+	// is that this user simply can't pass Authenticate's permission check again until they
+	// log in a second time to repopulate it.
 	ttl := time.Duration(result.AccessTokenTTLSeconds) * time.Second
-	if err := h.authz.CacheUserPermissions(c.Context(), t.ID, result.User.ID, ttl); err != nil {
+	if err := h.authz.CacheUserPermissions(c.Context(), result.AppID, result.User.ID, ttl); err != nil {
 		log.Printf("cache permissions for user %s: %v", result.User.ID, err)
 	}
 
