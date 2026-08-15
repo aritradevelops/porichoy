@@ -27,11 +27,12 @@ func New(tenantSvc *tenant.Service, identitySvc *identity.Service) *fiber.App {
 	// the first place.
 	api.Get("/domains/resolve", domains.Resolve)
 
-	// Tenant-resolved but not-yet-authenticated routes — signup is how a caller *becomes*
-	// authenticated, so only TenantResolution runs; Authentication/Authorization have
-	// nothing to check yet (no principal exists until Signup creates one).
+	// Tenant-resolved but not-yet-authenticated routes — signup/login are how a caller
+	// *becomes* authenticated, so only TenantResolution runs; Authentication/Authorization
+	// have nothing to check yet (no principal exists until one of these produces one).
 	public := api.Group("", TenantResolution(tenantSvc))
 	public.Post("/auth/signup", auth.Signup)
+	public.Post("/auth/login", auth.Login)
 
 	// Authenticated/authorized routes — full three-stage chain (CODING_STANDARDS.md §5).
 	authed := api.Group("", TenantResolution(tenantSvc), Authentication(), Authorization())

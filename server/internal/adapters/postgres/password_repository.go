@@ -2,6 +2,8 @@ package postgres
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"time"
 
 	"github.com/aritradevelops/porichoy/server/internal/identity"
@@ -35,6 +37,17 @@ func passwordToModel(p *identity.Password) *passwordModel {
 	}
 }
 
+func passwordFromModel(m *passwordModel) *identity.Password {
+	return &identity.Password{
+		ID:           m.ID,
+		UserID:       m.UserID,
+		PasswordHash: m.PasswordHash,
+		CreatedAt:    m.CreatedAt,
+		DeletedAt:    m.DeletedAt,
+		DeletedBy:    m.DeletedBy,
+	}
+}
+
 // PasswordRepository implements identity.PasswordRepository using Postgres via Bun.
 type PasswordRepository struct {
 	db bun.IDB
@@ -54,4 +67,22 @@ var _ identity.PasswordRepository = (*PasswordRepository)(nil)
 func (r *PasswordRepository) Create(ctx context.Context, p *identity.Password) error {
 	_, err := dbFromContext(ctx, r.db).NewInsert().Model(passwordToModel(p)).Exec(ctx)
 	return err
+}
+
+// FindByUserID returns userID's currently active password (identity.PasswordRepository) —
+// backs Login's credential check. Returns nil, nil if none exists. Participates in an
+// ambient transaction if ctx carries one (tx.go).
+func (r *PasswordRepository) FindByUserID(ctx context.Context, userID uuid.UUID) (*identity.Password, error) {
+	m := new(passwordModel)
+	err := dbFromContext(ctx, r.db).NewSelect().Model(m).
+		Where("user_id = ?", userID).
+		Where("deleted_at IS NULL").
+		Scan(ctx)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return passwordFromModel(m), nil
 }

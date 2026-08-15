@@ -153,3 +153,82 @@ func TestAuth_Signup_AssignsDefaultSignupRole(t *testing.T) {
 	require.Nil(t, env.Error)
 	ta.assignments.AssertExpectations(t)
 }
+
+func TestAuth_Login_OK(t *testing.T) {
+	ta := signupTestApp(t, tenant.LoginMethodEmailPassword)
+	sysApp := testSystemAppFixture(ta.tenantID)
+	hash, err := identity.HashPassword("hunter222")
+	require.NoError(t, err)
+	email := "existing@example.com"
+	u := &identity.User{ID: uuid.New(), TenantID: ta.tenantID, Status: identity.UserStatusActive, Email: &email}
+
+	ta.identityApps.On("FindSystemAppByTenant", mock.Anything, ta.tenantID).Return(sysApp, nil)
+	ta.users.On("FindByEmail", mock.Anything, ta.tenantID, email).Return(u, nil)
+	ta.passwords.On("FindByUserID", mock.Anything, u.ID).
+		Return(&identity.Password{ID: uuid.New(), UserID: u.ID, PasswordHash: hash}, nil)
+	ta.sessions.On("Create", mock.Anything, mock.AnythingOfType("*app.Session")).Return(nil)
+	ta.tokens.On("Issue", sysApp, mock.Anything, mock.Anything).Return("signed-token", nil)
+
+	status, env := ta.do(t, http.MethodPost, "/api/v1/auth/login",
+		loginRequest{Email: email, Password: "hunter222"}, nil)
+
+	require.Equal(t, http.StatusOK, status)
+	require.Nil(t, env.Error)
+	data := env.Data.(map[string]any)
+	require.Equal(t, email, data["email"])
+	require.Equal(t, "signed-token", data["access_token"])
+}
+
+func TestAuth_Login_WrongPassword(t *testing.T) {
+	ta := signupTestApp(t, tenant.LoginMethodEmailPassword)
+	sysApp := testSystemAppFixture(ta.tenantID)
+	hash, err := identity.HashPassword("hunter222")
+	require.NoError(t, err)
+	email := "existing@example.com"
+	u := &identity.User{ID: uuid.New(), TenantID: ta.tenantID, Status: identity.UserStatusActive, Email: &email}
+
+	ta.identityApps.On("FindSystemAppByTenant", mock.Anything, ta.tenantID).Return(sysApp, nil)
+	ta.users.On("FindByEmail", mock.Anything, ta.tenantID, email).Return(u, nil)
+	ta.passwords.On("FindByUserID", mock.Anything, u.ID).
+		Return(&identity.Password{ID: uuid.New(), UserID: u.ID, PasswordHash: hash}, nil)
+
+	status, env := ta.do(t, http.MethodPost, "/api/v1/auth/login",
+		loginRequest{Email: email, Password: "wrong-password"}, nil)
+
+	require.Equal(t, http.StatusUnauthorized, status)
+	require.Equal(t, "identity.invalid_credentials", env.Error.Key)
+}
+
+func TestAuth_Login_UnknownEmail(t *testing.T) {
+	ta := signupTestApp(t, tenant.LoginMethodEmailPassword)
+	sysApp := testSystemAppFixture(ta.tenantID)
+	ta.identityApps.On("FindSystemAppByTenant", mock.Anything, ta.tenantID).Return(sysApp, nil)
+	ta.users.On("FindByEmail", mock.Anything, ta.tenantID, "nobody@example.com").Return(nil, nil)
+
+	status, env := ta.do(t, http.MethodPost, "/api/v1/auth/login",
+		loginRequest{Email: "nobody@example.com", Password: "hunter222"}, nil)
+
+	require.Equal(t, http.StatusUnauthorized, status)
+	require.Equal(t, "identity.invalid_credentials", env.Error.Key)
+}
+
+func TestAuth_Login_ValidationError(t *testing.T) {
+	ta := signupTestApp(t, tenant.LoginMethodEmailPassword)
+
+	status, env := ta.do(t, http.MethodPost, "/api/v1/auth/login",
+		loginRequest{Email: "not-an-email", Password: ""}, nil)
+
+	require.Equal(t, http.StatusBadRequest, status)
+	require.Equal(t, "validation.failed", env.Error.Key)
+	ta.identityApps.AssertNotCalled(t, "FindSystemAppByTenant", mock.Anything, mock.Anything)
+}
+
+func TestAuth_Login_LoginMethodDisabled(t *testing.T) {
+	ta := signupTestApp(t, tenant.LoginMethodGoogle)
+
+	status, env := ta.do(t, http.MethodPost, "/api/v1/auth/login",
+		loginRequest{Email: "a@example.com", Password: "hunter222"}, nil)
+
+	require.Equal(t, http.StatusBadRequest, status)
+	require.Equal(t, "identity.login_method_disabled", env.Error.Key)
+}

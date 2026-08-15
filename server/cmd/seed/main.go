@@ -167,8 +167,8 @@ func main() {
 	fmt.Printf("  System app:  %s (client_id %s)\n", sysApp.Name, sysApp.ClientID)
 	fmt.Printf("  Superadmin:  %s (%s)\n", email, rootUser.ID)
 	fmt.Println()
-	fmt.Println("Next: register a domain for this tenant via POST /api/v1/domains/register")
-	fmt.Println("(no login endpoint exists yet — use the X-Debug-Principal-ID/X-Debug-Scope")
-	fmt.Println("dev headers, per internal/adapters/rest/middleware.go, until real")
-	fmt.Println("authentication lands) so requests can resolve to this tenant at all.")
+	fmt.Println("Next: log in via POST /api/v1/auth/login, then register a domain for this")
+	fmt.Println("tenant via POST /api/v1/domains/register. Authenticated routes don't verify")
+	fmt.Println("the issued JWT yet — use the X-Debug-Principal-ID/X-Debug-Scope dev headers,")
+	fmt.Println("per internal/adapters/rest/middleware.go, until real Authentication lands.")
 }

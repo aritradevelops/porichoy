@@ -15,6 +15,7 @@ import (
 	"github.com/aritradevelops/porichoy/server/internal/actor"
 	"github.com/aritradevelops/porichoy/server/internal/adapters/crypto"
 	"github.com/aritradevelops/porichoy/server/internal/adapters/postgres"
+	"github.com/aritradevelops/porichoy/server/internal/app"
 	"github.com/aritradevelops/porichoy/server/internal/identity"
 	"github.com/aritradevelops/porichoy/server/internal/tenant"
 	"github.com/google/uuid"
@@ -202,6 +203,43 @@ func TestIntegration_DomainsRegister_DescendantScope(t *testing.T) {
 		registerDomainRequest{TenantID: siblingID, Domain: "should-fail-" + uuid.NewString() + ".example.com"})
 	require.Equal(t, http.StatusNotFound, status)
 	require.Equal(t, "tenant.not_found", env.Error.Key)
+}
+
+func TestIntegration_SignupThenLogin(t *testing.T) {
+	domain := "login-flow-" + uuid.NewString() + ".example.com"
+	svc, tenantID := seedTenant(t, domain)
+	ctx := context.Background()
+	root := actor.Actor{Scope: actor.ScopeRoot}
+
+	_, err := svc.ConfigureTenant(ctx, root, tenantID, tenant.Config{
+		EnabledLoginMethods: []tenant.LoginMethod{tenant.LoginMethodEmailPassword},
+	})
+	require.NoError(t, err)
+	_, err = app.NewService(postgres.NewAppRepository(testDB)).CreateSystemApp(ctx, tenantID, "System")
+	require.NoError(t, err)
+
+	fiberApp := New(svc, newIdentityService())
+	email := "login-e2e-" + uuid.NewString() + "@example.com"
+
+	// Sign up, then log in with the same credentials.
+	status, env := doRequest(t, fiberApp, http.MethodPost, domain, "/api/v1/auth/signup",
+		signupRequest{Email: email, Password: "hunter222"})
+	require.Equal(t, http.StatusCreated, status)
+	require.Nil(t, env.Error)
+
+	status, env = doRequest(t, fiberApp, http.MethodPost, domain, "/api/v1/auth/login",
+		loginRequest{Email: email, Password: "hunter222"})
+	require.Equal(t, http.StatusOK, status)
+	require.Nil(t, env.Error)
+	data := env.Data.(map[string]any)
+	require.Equal(t, email, data["email"])
+	require.NotEmpty(t, data["access_token"])
+
+	// The wrong password is rejected, without revealing that the account exists.
+	status, env = doRequest(t, fiberApp, http.MethodPost, domain, "/api/v1/auth/login",
+		loginRequest{Email: email, Password: "wrong-password"})
+	require.Equal(t, http.StatusUnauthorized, status)
+	require.Equal(t, "identity.invalid_credentials", env.Error.Key)
 }
 
 func boolPtr(b bool) *bool { return &b }

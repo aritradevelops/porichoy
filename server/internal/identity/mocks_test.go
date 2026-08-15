@@ -28,6 +28,12 @@ func (m *mockPasswordRepo) Create(ctx context.Context, p *Password) error {
 	return m.Called(ctx, p).Error(0)
 }
 
+func (m *mockPasswordRepo) FindByUserID(ctx context.Context, userID uuid.UUID) (*Password, error) {
+	args := m.Called(ctx, userID)
+	p, _ := args.Get(0).(*Password)
+	return p, args.Error(1)
+}
+
 type mockAppRepo struct{ mock.Mock }
 
 func (m *mockAppRepo) CreateSystem(ctx context.Context, a *app.App) error {

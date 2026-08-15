@@ -40,9 +40,10 @@ var messages = map[string]string{
 	"identity.email_already_registered": "An account with this email already exists.",
 	"identity.system_app_not_found":     "This tenant isn't fully set up yet. Please contact your administrator.",
 	"identity.password_too_long":        "Password must be 72 characters or fewer.",
+	"identity.invalid_credentials":      "Incorrect email or password.",
 	"validation.invalid_body":           "The request body is malformed.",
-	"validation.failed":                "The request failed validation.",
-	"internal.error":                   "Something went wrong. Please try again.",
+	"validation.failed":                 "The request failed validation.",
+	"internal.error":                    "Something went wrong. Please try again.",
 }
 
 func resolveMessage(key string) string {

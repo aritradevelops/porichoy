@@ -166,6 +166,94 @@ func TestService_Signup_EmailAlreadyRegistered(t *testing.T) {
 	assertAppErrorKey(t, err, "identity.email_already_registered")
 }
 
+func TestService_Login_OK(t *testing.T) {
+	svc, users, passwords, apps, sessions, _, tokens := newTestService()
+	tt := testTenant(tenant.LoginMethodEmailPassword)
+	sysApp := testSystemApp(tt.ID)
+	hash, err := HashPassword("hunter22")
+	require.NoError(t, err)
+	u := &User{ID: uuid.New(), TenantID: tt.ID, Status: UserStatusActive, Email: strPtr("a@example.com"), EmailVerified: true}
+
+	apps.On("FindSystemAppByTenant", mock.Anything, tt.ID).Return(sysApp, nil)
+	users.On("FindByEmail", mock.Anything, tt.ID, "a@example.com").Return(u, nil)
+	passwords.On("FindByUserID", mock.Anything, u.ID).Return(&Password{ID: uuid.New(), UserID: u.ID, PasswordHash: hash}, nil)
+	sessions.On("Create", mock.Anything, mock.AnythingOfType("*app.Session")).Return(nil)
+	tokens.On("Issue", sysApp, mock.Anything, mock.Anything).Return("signed-token", nil)
+
+	result, err := svc.Login(context.Background(), tt, " A@Example.com ", "hunter22")
+
+	require.NoError(t, err)
+	require.Equal(t, u.ID, result.User.ID)
+	require.Equal(t, "signed-token", result.AccessToken)
+	require.NotEmpty(t, result.RefreshToken)
+	sessions.AssertExpectations(t)
+}
+
+func TestService_Login_WrongPassword(t *testing.T) {
+	svc, users, passwords, apps, _, _, _ := newTestService()
+	tt := testTenant(tenant.LoginMethodEmailPassword)
+	sysApp := testSystemApp(tt.ID)
+	hash, err := HashPassword("hunter22")
+	require.NoError(t, err)
+	u := &User{ID: uuid.New(), TenantID: tt.ID, Status: UserStatusActive, Email: strPtr("a@example.com")}
+
+	apps.On("FindSystemAppByTenant", mock.Anything, tt.ID).Return(sysApp, nil)
+	users.On("FindByEmail", mock.Anything, tt.ID, "a@example.com").Return(u, nil)
+	passwords.On("FindByUserID", mock.Anything, u.ID).Return(&Password{ID: uuid.New(), UserID: u.ID, PasswordHash: hash}, nil)
+
+	_, err = svc.Login(context.Background(), tt, "a@example.com", "wrong-password")
+
+	assertAppErrorKey(t, err, "identity.invalid_credentials")
+}
+
+func TestService_Login_UnknownEmail(t *testing.T) {
+	svc, users, _, apps, _, _, _ := newTestService()
+	tt := testTenant(tenant.LoginMethodEmailPassword)
+	sysApp := testSystemApp(tt.ID)
+
+	apps.On("FindSystemAppByTenant", mock.Anything, tt.ID).Return(sysApp, nil)
+	users.On("FindByEmail", mock.Anything, tt.ID, "nobody@example.com").Return(nil, nil)
+
+	_, err := svc.Login(context.Background(), tt, "nobody@example.com", "hunter22")
+
+	assertAppErrorKey(t, err, "identity.invalid_credentials")
+}
+
+func TestService_Login_InactiveUser(t *testing.T) {
+	svc, users, _, apps, _, _, _ := newTestService()
+	tt := testTenant(tenant.LoginMethodEmailPassword)
+	sysApp := testSystemApp(tt.ID)
+	u := &User{ID: uuid.New(), TenantID: tt.ID, Status: UserStatusDraft, Email: strPtr("a@example.com")}
+
+	apps.On("FindSystemAppByTenant", mock.Anything, tt.ID).Return(sysApp, nil)
+	users.On("FindByEmail", mock.Anything, tt.ID, "a@example.com").Return(u, nil)
+
+	_, err := svc.Login(context.Background(), tt, "a@example.com", "hunter22")
+
+	assertAppErrorKey(t, err, "identity.invalid_credentials")
+}
+
+func TestService_Login_LoginMethodDisabled(t *testing.T) {
+	svc, users, _, apps, _, _, _ := newTestService()
+	tt := testTenant(tenant.LoginMethodGoogle) // no email_password
+
+	_, err := svc.Login(context.Background(), tt, "a@example.com", "hunter22")
+
+	assertAppErrorKey(t, err, "identity.login_method_disabled")
+	apps.AssertNotCalled(t, "FindSystemAppByTenant", mock.Anything, mock.Anything)
+	users.AssertNotCalled(t, "FindByEmail", mock.Anything, mock.Anything, mock.Anything)
+}
+
+func TestService_Login_SystemAppNotFound(t *testing.T) {
+	svc, _, _, apps, _, _, _ := newTestService()
+	tt := testTenant(tenant.LoginMethodEmailPassword)
+	apps.On("FindSystemAppByTenant", mock.Anything, tt.ID).Return(nil, nil)
+
+	_, err := svc.Login(context.Background(), tt, "a@example.com", "hunter22")
+
+	assertAppErrorKey(t, err, "identity.system_app_not_found")
+}
+
 func TestService_CreateRootUser(t *testing.T) {
 	svc, users, passwords, _, _, _, _ := newTestService()
 	tenantID := uuid.New()
