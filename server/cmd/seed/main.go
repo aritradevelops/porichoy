@@ -167,8 +167,9 @@ func main() {
 	fmt.Printf("  System app:  %s (client_id %s)\n", sysApp.Name, sysApp.ClientID)
 	fmt.Printf("  Superadmin:  %s (%s)\n", email, rootUser.ID)
 	fmt.Println()
-	fmt.Println("Next: log in via POST /api/v1/auth/login, then register a domain for this")
-	fmt.Println("tenant via POST /api/v1/domains/register. Authenticated routes don't verify")
-	fmt.Println("the issued JWT yet — use the X-Debug-Principal-ID/X-Debug-Scope dev headers,")
-	fmt.Println("per internal/adapters/rest/middleware.go, until real Authentication lands.")
+	fmt.Println("Next: log in via POST /api/v1/auth/login, then pass the returned access_token")
+	fmt.Println("as \"Authorization: Bearer <token>\" (or an access_token cookie) to register a")
+	fmt.Println("domain for this tenant via POST /api/v1/domains/register. Authorization itself")
+	fmt.Println("is still a stub — pass X-Debug-Scope to exercise a scope other than \"tenant\",")
+	fmt.Println("per internal/adapters/rest/middleware.go, until real permission checks land.")
 }

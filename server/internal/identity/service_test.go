@@ -2,6 +2,7 @@ package identity
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -252,6 +253,59 @@ func TestService_Login_SystemAppNotFound(t *testing.T) {
 	_, err := svc.Login(context.Background(), tt, "a@example.com", "hunter22")
 
 	assertAppErrorKey(t, err, "identity.system_app_not_found")
+}
+
+func TestService_Authenticate_OK(t *testing.T) {
+	svc, _, _, apps, _, _, tokens := newTestService()
+	tt := &tenant.Tenant{ID: uuid.New()}
+	sysApp := testSystemApp(tt.ID)
+	principalID := uuid.New()
+
+	apps.On("FindSystemAppByTenant", mock.Anything, tt.ID).Return(sysApp, nil)
+	tokens.On("Verify", sysApp, "a-valid-token").
+		Return(app.Claims{Subject: principalID.String(), Audience: tt.ID.String()}, nil)
+
+	got, err := svc.Authenticate(context.Background(), tt, "a-valid-token")
+
+	require.NoError(t, err)
+	require.Equal(t, principalID, got)
+}
+
+func TestService_Authenticate_BadSignature(t *testing.T) {
+	svc, _, _, apps, _, _, tokens := newTestService()
+	tt := &tenant.Tenant{ID: uuid.New()}
+	sysApp := testSystemApp(tt.ID)
+
+	apps.On("FindSystemAppByTenant", mock.Anything, tt.ID).Return(sysApp, nil)
+	tokens.On("Verify", sysApp, "forged-token").Return(app.Claims{}, errors.New("signature verification failed"))
+
+	_, err := svc.Authenticate(context.Background(), tt, "forged-token")
+
+	assertAppErrorKey(t, err, "identity.unauthenticated")
+}
+
+func TestService_Authenticate_TokenForAnotherTenant(t *testing.T) {
+	svc, _, _, apps, _, _, tokens := newTestService()
+	tt := &tenant.Tenant{ID: uuid.New()}
+	sysApp := testSystemApp(tt.ID)
+
+	apps.On("FindSystemAppByTenant", mock.Anything, tt.ID).Return(sysApp, nil)
+	tokens.On("Verify", sysApp, "cross-tenant-token").
+		Return(app.Claims{Subject: uuid.NewString(), Audience: uuid.NewString()}, nil)
+
+	_, err := svc.Authenticate(context.Background(), tt, "cross-tenant-token")
+
+	assertAppErrorKey(t, err, "identity.unauthenticated")
+}
+
+func TestService_Authenticate_SystemAppNotFound(t *testing.T) {
+	svc, _, _, apps, _, _, _ := newTestService()
+	tt := &tenant.Tenant{ID: uuid.New()}
+	apps.On("FindSystemAppByTenant", mock.Anything, tt.ID).Return(nil, nil)
+
+	_, err := svc.Authenticate(context.Background(), tt, "any-token")
+
+	assertAppErrorKey(t, err, "identity.unauthenticated")
 }
 
 func TestService_CreateRootUser(t *testing.T) {

@@ -7,7 +7,10 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
+	"github.com/aritradevelops/porichoy/server/internal/adapters/crypto"
+	"github.com/aritradevelops/porichoy/server/internal/app"
 	"github.com/aritradevelops/porichoy/server/internal/identity"
 	"github.com/aritradevelops/porichoy/server/internal/tenant"
 	"github.com/gofiber/fiber/v2"
@@ -20,24 +23,36 @@ const testHost = "acme.example.com"
 
 // testApp wires a real Fiber app (rest.New) over mocked repositories, so every request
 // exercises the actual middleware chain and handler code — only the DB is faked, matching
-// how internal/tenant/service_test.go isolates Service from Postgres.
+// how internal/tenant/service_test.go isolates Service from Postgres. tokens is a real
+// crypto.Issuer, not a mock: Authentication now verifies a real signature
+// (internal/identity.Service.Authenticate), and every authed-route test needs that to
+// succeed without restating JWT-mocking boilerplate — do() attaches the pre-minted valid
+// token automatically.
 type testApp struct {
-	app         *fiber.App
-	tenants     *mockTenantRepo
-	domains     *mockDomainRepo
-	creds       *mockCredentialRepo
-	users       *mockUserRepo
-	passwords   *mockPasswordRepo
+	app          *fiber.App
+	tenants      *mockTenantRepo
+	domains      *mockDomainRepo
+	creds        *mockCredentialRepo
+	users        *mockUserRepo
+	passwords    *mockPasswordRepo
 	identityApps *mockIdentityAppRepo
-	sessions    *mockSessionRepo
-	assignments *mockRoleAssignmentRepo
+	sessions     *mockSessionRepo
+	assignments  *mockRoleAssignmentRepo
+	// tokens is only populated by signupTestApp (auth_handlers_test.go) — Signup/Login tests
+	// want to mock+assert on Issue directly. newTestApp uses a real crypto.Issuer instead
+	// (see token/principalID below) since its authed-route tests need Authentication's
+	// Verify call to actually succeed, which a bare mock can't do without per-test setup.
 	tokens      *mockTokenIssuer
 	tenantID    uuid.UUID
+	principalID uuid.UUID
+	token       string
 }
 
 // newTestApp builds a testApp with testHost already resolving to a fixture tenant
-// (tenantID) — the one thing every authenticated-route test needs, since TenantResolution
-// runs on every request in the "authed" group.
+// (tenantID) with its own system app, plus a valid access token for principalID against
+// that tenant — the things every authenticated-route test needs, since
+// TenantResolution+Authentication+Authorization all run on every request in the "authed"
+// group.
 func newTestApp(t *testing.T) *testApp {
 	t.Helper()
 	tenants := &mockTenantRepo{}
@@ -48,7 +63,7 @@ func newTestApp(t *testing.T) *testApp {
 	identityApps := &mockIdentityAppRepo{}
 	sessions := &mockSessionRepo{}
 	assignments := &mockRoleAssignmentRepo{}
-	tokens := &mockTokenIssuer{}
+	issuer := crypto.NewIssuer()
 
 	tenantID := uuid.New()
 	domains.On("FindByDomain", mock.Anything, testHost).
@@ -56,8 +71,21 @@ func newTestApp(t *testing.T) *testApp {
 	tenants.On("FindByID", mock.Anything, tenantID).
 		Return(&tenant.Tenant{ID: tenantID, Name: "Acme"}, nil)
 
+	sysApp := &app.App{
+		ID:               uuid.New(),
+		TenantID:         tenantID,
+		IsSystem:         true,
+		SigningAlgorithm: app.SigningAlgorithmHS256,
+		SigningKeyConfig: []byte("test-fixture-signing-key-32-bytes!!"),
+	}
+	identityApps.On("FindSystemAppByTenant", mock.Anything, tenantID).Return(sysApp, nil)
+
+	principalID := uuid.New()
+	token, err := issuer.Issue(sysApp, app.Claims{Subject: principalID.String(), Audience: tenantID.String()}, time.Hour)
+	require.NoError(t, err)
+
 	tenantSvc := tenant.NewService(tenants, domains, creds)
-	identitySvc := identity.NewService(users, passwords, identityApps, sessions, assignments, tokens, noopTxRunner{})
+	identitySvc := identity.NewService(users, passwords, identityApps, sessions, assignments, issuer, noopTxRunner{})
 	return &testApp{
 		app:          New(tenantSvc, identitySvc),
 		tenants:      tenants,
@@ -68,13 +96,16 @@ func newTestApp(t *testing.T) *testApp {
 		identityApps: identityApps,
 		sessions:     sessions,
 		assignments:  assignments,
-		tokens:       tokens,
 		tenantID:     tenantID,
+		principalID:  principalID,
+		token:        token,
 	}
 }
 
 // do sends a request against ta.app and returns the decoded envelope alongside the raw
-// status code, so tests can assert on both without repeating the boilerplate.
+// status code, so tests can assert on both without repeating the boilerplate. Every request
+// carries ta.token as a bearer credential by default — pass an explicit "Authorization"
+// entry in headers (even "") to exercise a different/missing-auth case.
 func (ta *testApp) do(t *testing.T, method, target string, body any, headers map[string]string) (int, envelope) {
 	t.Helper()
 	var reader io.Reader
@@ -85,6 +116,7 @@ func (ta *testApp) do(t *testing.T, method, target string, body any, headers map
 	}
 	req := httptest.NewRequest(method, "http://"+testHost+target, reader)
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+ta.token)
 	for k, v := range headers {
 		req.Header.Set(k, v)
 	}
@@ -108,6 +140,66 @@ func TestTenantResolution_UnregisteredHost(t *testing.T) {
 	resp, err := ta.app.Test(req)
 	require.NoError(t, err)
 	require.Equal(t, http.StatusNotFound, resp.StatusCode)
+}
+
+func TestAuthentication_NoToken(t *testing.T) {
+	ta := newTestApp(t)
+
+	status, env := ta.do(t, http.MethodGet, "/api/v1/tenants/get/"+ta.tenantID.String(), nil,
+		map[string]string{"Authorization": ""})
+
+	require.Equal(t, http.StatusUnauthorized, status)
+	require.Equal(t, "identity.unauthenticated", env.Error.Key)
+}
+
+func TestAuthentication_MalformedToken(t *testing.T) {
+	ta := newTestApp(t)
+
+	status, env := ta.do(t, http.MethodGet, "/api/v1/tenants/get/"+ta.tenantID.String(), nil,
+		map[string]string{"Authorization": "Bearer not-a-real-token"})
+
+	require.Equal(t, http.StatusUnauthorized, status)
+	require.Equal(t, "identity.unauthenticated", env.Error.Key)
+}
+
+func TestAuthentication_TokenSignedByAnotherApp(t *testing.T) {
+	ta := newTestApp(t)
+	wrongApp := &app.App{SigningAlgorithm: app.SigningAlgorithmHS256, SigningKeyConfig: []byte("a-completely-different-signing-key")}
+	forged, err := crypto.NewIssuer().Issue(wrongApp, app.Claims{Subject: uuid.NewString(), Audience: ta.tenantID.String()}, time.Hour)
+	require.NoError(t, err)
+
+	status, env := ta.do(t, http.MethodGet, "/api/v1/tenants/get/"+ta.tenantID.String(), nil,
+		map[string]string{"Authorization": "Bearer " + forged})
+
+	require.Equal(t, http.StatusUnauthorized, status)
+	require.Equal(t, "identity.unauthenticated", env.Error.Key)
+}
+
+func TestAuthentication_TokenForAnotherTenant(t *testing.T) {
+	ta := newTestApp(t)
+	sysApp := &app.App{SigningAlgorithm: app.SigningAlgorithmHS256, SigningKeyConfig: []byte("test-fixture-signing-key-32-bytes!!")}
+	tokenForOtherTenant, err := crypto.NewIssuer().Issue(sysApp, app.Claims{Subject: uuid.NewString(), Audience: uuid.NewString()}, time.Hour)
+	require.NoError(t, err)
+
+	status, env := ta.do(t, http.MethodGet, "/api/v1/tenants/get/"+ta.tenantID.String(), nil,
+		map[string]string{"Authorization": "Bearer " + tokenForOtherTenant})
+
+	require.Equal(t, http.StatusUnauthorized, status)
+	require.Equal(t, "identity.unauthenticated", env.Error.Key)
+}
+
+func TestAuthentication_TokenFromCookie(t *testing.T) {
+	ta := newTestApp(t)
+	ta.tenants.On("GetByID", mock.Anything, mock.Anything, ta.tenantID).
+		Return(&tenant.Tenant{ID: ta.tenantID, Name: "Acme"}, nil)
+
+	req := httptest.NewRequest(http.MethodGet, "http://"+testHost+"/api/v1/tenants/get/"+ta.tenantID.String(), nil)
+	req.Header.Set("Cookie", "access_token="+ta.token)
+	resp, err := ta.app.Test(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	require.Equal(t, http.StatusOK, resp.StatusCode)
 }
 
 func TestTenants_Create_OK(t *testing.T) {

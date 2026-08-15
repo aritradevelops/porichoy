@@ -56,3 +56,48 @@ func TestIssuer_Issue_UnsupportedAlgorithm(t *testing.T) {
 
 	require.ErrorIs(t, err, ErrUnsupportedSigningAlgorithm)
 }
+
+func TestIssuer_Verify_RoundTripsIssue(t *testing.T) {
+	a := &app.App{SigningAlgorithm: app.SigningAlgorithmHS256, SigningKeyConfig: []byte("test-secret-at-least-32-bytes-long!")}
+	issuer := NewIssuer()
+	signed, err := issuer.Issue(a, app.Claims{Subject: "user-1", Audience: "tenant-1"}, time.Hour)
+	require.NoError(t, err)
+
+	claims, err := issuer.Verify(a, signed)
+
+	require.NoError(t, err)
+	assert.Equal(t, "user-1", claims.Subject)
+	assert.Equal(t, "tenant-1", claims.Audience)
+}
+
+func TestIssuer_Verify_RejectsWrongKey(t *testing.T) {
+	a := &app.App{SigningAlgorithm: app.SigningAlgorithmHS256, SigningKeyConfig: []byte("right-secret-at-least-32-bytes!!")}
+	issuer := NewIssuer()
+	signed, err := issuer.Issue(a, app.Claims{Subject: "user-1", Audience: "tenant-1"}, time.Hour)
+	require.NoError(t, err)
+
+	wrongKeyApp := &app.App{SigningAlgorithm: app.SigningAlgorithmHS256, SigningKeyConfig: []byte("wrong-secret-at-least-32-bytes!!")}
+	_, err = issuer.Verify(wrongKeyApp, signed)
+
+	assert.Error(t, err)
+}
+
+func TestIssuer_Verify_RejectsExpiredToken(t *testing.T) {
+	a := &app.App{SigningAlgorithm: app.SigningAlgorithmHS256, SigningKeyConfig: []byte("test-secret-at-least-32-bytes-long!")}
+	issuer := NewIssuer()
+	signed, err := issuer.Issue(a, app.Claims{Subject: "user-1", Audience: "tenant-1"}, -time.Minute)
+	require.NoError(t, err)
+
+	_, err = issuer.Verify(a, signed)
+
+	assert.Error(t, err)
+}
+
+func TestIssuer_Verify_UnsupportedAlgorithm(t *testing.T) {
+	a := &app.App{SigningAlgorithm: "RS256"}
+	issuer := NewIssuer()
+
+	_, err := issuer.Verify(a, "irrelevant")
+
+	require.ErrorIs(t, err, ErrUnsupportedSigningAlgorithm)
+}

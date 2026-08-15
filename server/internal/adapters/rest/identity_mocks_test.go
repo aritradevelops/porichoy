@@ -75,6 +75,12 @@ func (m *mockTokenIssuer) Issue(a *app.App, claims app.Claims, ttl time.Duration
 	return args.String(0), args.Error(1)
 }
 
+func (m *mockTokenIssuer) Verify(a *app.App, tokenString string) (app.Claims, error) {
+	args := m.Called(a, tokenString)
+	c, _ := args.Get(0).(app.Claims)
+	return c, args.Error(1)
+}
+
 // noopTxRunner just invokes fn directly — tests use mocked repositories with no real
 // database underneath, so there's nothing to actually commit/roll back.
 type noopTxRunner struct{}

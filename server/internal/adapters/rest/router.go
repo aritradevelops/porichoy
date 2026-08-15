@@ -35,7 +35,7 @@ func New(tenantSvc *tenant.Service, identitySvc *identity.Service) *fiber.App {
 	public.Post("/auth/login", auth.Login)
 
 	// Authenticated/authorized routes — full three-stage chain (CODING_STANDARDS.md §5).
-	authed := api.Group("", TenantResolution(tenantSvc), Authentication(), Authorization())
+	authed := api.Group("", TenantResolution(tenantSvc), Authentication(identitySvc), Authorization())
 	authed.Post("/tenants/create", tenants.Create)
 	authed.Get("/tenants/list", tenants.List)
 	authed.Get("/tenants/get/:id", tenants.Get)

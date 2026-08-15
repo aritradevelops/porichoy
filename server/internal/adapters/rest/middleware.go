@@ -1,8 +1,11 @@
 package rest
 
 import (
+	"strings"
+
 	"github.com/aritradevelops/porichoy/server/internal/actor"
 	"github.com/aritradevelops/porichoy/server/internal/apperror"
+	"github.com/aritradevelops/porichoy/server/internal/identity"
 	"github.com/aritradevelops/porichoy/server/internal/tenant"
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
@@ -17,10 +20,23 @@ const (
 	localsActor       = "actor"
 )
 
-// devPrincipalID is the fallback caller identity when no debug header is supplied — lets
-// the stubbed auth chain (below) produce a usable Actor out of the box, not just when a
-// caller remembers to pass headers.
-var devPrincipalID = uuid.MustParse("00000000-0000-0000-0000-000000000001")
+// bearerPrefix is the Authorization header scheme Authentication looks for before falling
+// back to authCookieName.
+const bearerPrefix = "Bearer "
+
+// authCookieName is the fallback location for the access token when it isn't sent as a
+// bearer header — no response sets this cookie yet (Signup/Login only return tokens in the
+// JSON body), this is forward-looking for a future browser-based flow that does.
+const authCookieName = "access_token"
+
+// extractToken returns the raw token from c: the Authorization header's Bearer scheme
+// first, falling back to the authCookieName cookie. Returns "" if neither is present.
+func extractToken(c *fiber.Ctx) string {
+	if h := c.Get(fiber.HeaderAuthorization); strings.HasPrefix(h, bearerPrefix) {
+		return strings.TrimPrefix(h, bearerPrefix)
+	}
+	return c.Cookies(authCookieName)
+}
 
 // TenantResolution is the first stage of the chain (CODING_STANDARDS.md §5,
 // AUTHORIZATION_MODEL.md's model): resolves which tenant the request's Host belongs to
@@ -43,30 +59,33 @@ func TenantResolution(svc *tenant.Service) fiber.Handler {
 	}
 }
 
-// Authentication is a placeholder for real session/token verification
-// (internal/identity — user login, session issuance — doesn't exist in this repo yet).
-// For now it trusts an optional X-Debug-Principal-ID header, falling back to a fixed dev
-// principal when absent, so the rest of the chain (and every downstream handler) has a
-// real, working Actor to build without needing the identity subsystem to exist first.
-// This is explicitly a stand-in, not a security boundary — replace wholesale once real
-// authentication lands, don't extend it.
-func Authentication() fiber.Handler {
+// Authentication verifies the caller's access token — extractToken's Authorization-header-
+// then-cookie precedence — against the tenant TenantResolution already resolved, and stashes
+// the authenticated principal's UserID in Locals for Authorization to build the Actor from.
+// Replaces the former X-Debug-Principal-ID stand-in wholesale (that stub's own doc comment
+// said to, not extend it) now that Signup/Login (internal/identity.Service) issue real,
+// verifiable tokens.
+func Authentication(identitySvc *identity.Service) fiber.Handler {
 	return func(c *fiber.Ctx) error {
-		principalID := devPrincipalID
-		if h := c.Get("X-Debug-Principal-ID"); h != "" {
-			if id, err := uuid.Parse(h); err == nil {
-				principalID = id
-			}
+		token := extractToken(c)
+		if token == "" {
+			return fail(c, apperror.New("identity.unauthenticated", fiber.StatusUnauthorized))
+		}
+
+		principalID, err := identitySvc.Authenticate(c.Context(), tenantFromLocals(c), token)
+		if err != nil {
+			return fail(c, err)
 		}
 		c.Locals(localsPrincipalID, principalID)
 		return c.Next()
 	}
 }
 
-// Authorization is a placeholder for real permission checking
-// (internal/authorization — Role, RoleAssignment — doesn't exist in this repo yet, so
-// AUTHORIZATION_MODEL.md §2 steps 1-2, looking up the caller's permissions, have nothing
-// to look up against). It does not reject any request. What it DOES do for real: build the
+// Authorization is a placeholder for real permission checking — internal/authorization's
+// Role/RoleAssignment tables exist and are populated (Signup, the CLI seed), but nothing
+// queries them at request time yet, so AUTHORIZATION_MODEL.md §2 steps 1-2, looking up the
+// caller's permissions, have nowhere real to look. It does not reject any request. What it
+// DOES do for real: build the
 // actor.Actor every downstream Service/Repository call needs, from what TenantResolution
 // and Authentication already resolved, plus an optional X-Debug-Scope header (defaults to
 // actor.ScopeTenant — the most common real-world case) so different scope levels are

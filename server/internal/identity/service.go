@@ -26,7 +26,7 @@ type Service struct {
 	apps            app.Repository
 	sessions        app.SessionRepository
 	roleAssignments authorization.RoleAssignmentRepository
-	tokens          app.TokenIssuer
+	tokens          app.TokenService
 	tx              TxRunner
 }
 
@@ -37,7 +37,7 @@ func NewService(
 	apps app.Repository,
 	sessions app.SessionRepository,
 	roleAssignments authorization.RoleAssignmentRepository,
-	tokens app.TokenIssuer,
+	tokens app.TokenService,
 	tx TxRunner,
 ) *Service {
 	return &Service{
@@ -237,6 +237,41 @@ func (s *Service) Login(ctx context.Context, t *tenant.Tenant, email, password s
 		RefreshToken:          rawRefresh,
 		AccessTokenTTLSeconds: sysApp.AccessTokenTTLSeconds,
 	}, nil
+}
+
+// Authenticate verifies tokenString against t's default system app and returns the
+// authenticated principal's UserID — the Service-layer half of the real Authentication
+// middleware (internal/adapters/rest/middleware.go extracts the raw token from the request;
+// this does the actual verification). Every failure — no system app, bad signature, expired
+// token, or a token issued for a different tenant than t — collapses into the same
+// identity.unauthenticated/401, so a caller can't learn which.
+func (s *Service) Authenticate(ctx context.Context, t *tenant.Tenant, tokenString string) (uuid.UUID, error) {
+	unauthenticated := apperror.New("identity.unauthenticated", http.StatusUnauthorized)
+
+	sysApp, err := s.apps.FindSystemAppByTenant(ctx, t.ID)
+	if err != nil {
+		return uuid.Nil, err
+	}
+	if sysApp == nil {
+		return uuid.Nil, unauthenticated
+	}
+
+	claims, err := s.tokens.Verify(sysApp, tokenString)
+	if err != nil {
+		return uuid.Nil, unauthenticated
+	}
+	// A token's aud is the tenant it was issued for (TECHNICAL_DESIGN §3.5) — without this
+	// check, a token issued while authenticated against one tenant's domain would also
+	// authenticate requests against any other tenant's domain sharing this same principal ID
+	// (subs aren't namespaced by tenant on their own).
+	if claims.Audience != t.ID.String() {
+		return uuid.Nil, unauthenticated
+	}
+	principalID, err := uuid.Parse(claims.Subject)
+	if err != nil {
+		return uuid.Nil, unauthenticated
+	}
+	return principalID, nil
 }
 
 // issueTokenPair issues a fresh access + ID token for u against sysApp/t — the shared final
