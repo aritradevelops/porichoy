@@ -56,6 +56,10 @@ func (m *mockDomainRepo) Create(ctx context.Context, act actor.Actor, d *TenantD
 	return m.Called(ctx, act, d).Error(0)
 }
 
+func (m *mockDomainRepo) CreateRoot(ctx context.Context, d *TenantDomain) error {
+	return m.Called(ctx, d).Error(0)
+}
+
 func (m *mockDomainRepo) FindByDomain(ctx context.Context, domain string) (*TenantDomain, error) {
 	args := m.Called(ctx, domain)
 	d, _ := args.Get(0).(*TenantDomain)

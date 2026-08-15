@@ -54,7 +54,7 @@ func domainToModel(d *tenant.TenantDomain) *domainModel {
 
 // DomainRepository implements tenant.DomainRepository using Postgres via Bun.
 type DomainRepository struct {
-	db *bun.DB
+	db bun.IDB
 }
 
 // NewDomainRepository builds a DomainRepository from an open Bun connection.
@@ -81,6 +81,15 @@ func (r *DomainRepository) Create(ctx context.Context, act actor.Actor, d *tenan
 		return tenant.ErrTenantNotFound
 	}
 	_, err = r.db.NewInsert().Model(domainToModel(d)).Exec(ctx)
+	return err
+}
+
+// CreateRoot persists d with no authorization check (tenant.DomainRepository) — the CLI
+// seed's bootstrap path, registering the root tenant's first domain before any actor.Actor
+// exists. Participates in an ambient transaction if ctx carries one (tx.go), same as
+// TenantRepository.CreateRoot.
+func (r *DomainRepository) CreateRoot(ctx context.Context, d *tenant.TenantDomain) error {
+	_, err := dbFromContext(ctx, r.db).NewInsert().Model(domainToModel(d)).Exec(ctx)
 	return err
 }
 

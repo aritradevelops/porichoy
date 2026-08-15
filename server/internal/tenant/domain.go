@@ -38,6 +38,11 @@ type DomainRepository interface {
 	// already carries CreatedBy (set by tenant.Service), but act is still needed for this
 	// authorization check — the same reason tenant.Repository.Create needs one.
 	Create(ctx context.Context, act actor.Actor, d *TenantDomain) error
+	// CreateRoot persists d with no authorization check — the CLI seed's bootstrap path
+	// (USER_JOURNEYS_ADMIN_TENANT_MANAGEMENT.md §1), registering the root tenant's first
+	// domain in the same transaction that creates the tenant itself, before any actor.Actor
+	// can exist. Mirrors Repository.CreateRoot.
+	CreateRoot(ctx context.Context, d *TenantDomain) error
 	// FindByDomain resolves the tenant a given origin belongs to. Returns nil,
 	// nil if no tenant has registered this domain.
 	//

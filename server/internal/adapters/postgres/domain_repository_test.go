@@ -23,6 +23,23 @@ func newTestDomain(tenantID uuid.UUID, domain string) *tenant.TenantDomain {
 	}
 }
 
+func TestDomainRepository_CreateRoot(t *testing.T) {
+	tenants := NewTenantRepository(testDB)
+	domains := NewDomainRepository(testDB)
+	ctx := context.Background()
+
+	tt := newTestTenant("Root Domain Tenant", nil)
+	require.NoError(t, tenants.CreateRoot(ctx, tt))
+
+	d := newTestDomain(tt.ID, "root-domain-"+uuid.NewString()+".example.com")
+	require.NoError(t, domains.CreateRoot(ctx, d))
+
+	got, err := domains.FindByDomain(ctx, d.Domain)
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	assert.Equal(t, tt.ID, got.TenantID)
+}
+
 func TestDomainRepository_CreateAndFindByDomain(t *testing.T) {
 	tenants := NewTenantRepository(testDB)
 	domains := NewDomainRepository(testDB)

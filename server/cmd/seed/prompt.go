@@ -44,6 +44,26 @@ func promptEmail(r *bufio.Reader, label string) (string, error) {
 	}
 }
 
+// promptDomain is promptString plus stripping a pasted-in scheme/path — TenantResolution
+// matches on bare Host header values (e.g. "admin.example.com"), not a full URL, and pasting
+// "https://admin.example.com/" is an easy mistake to make when copying from a browser.
+func promptDomain(r *bufio.Reader, label string) (string, error) {
+	for {
+		v, err := promptString(r, label)
+		if err != nil {
+			return "", err
+		}
+		v = strings.TrimPrefix(v, "https://")
+		v = strings.TrimPrefix(v, "http://")
+		v = strings.TrimSuffix(v, "/")
+		if v == "" {
+			fmt.Println("This field is required.")
+			continue
+		}
+		return v, nil
+	}
+}
+
 // promptPassword reads a masked password (golang.org/x/term — no stdlib equivalent), asks
 // for it twice, and re-prompts until both entries match and fall within the same length
 // bounds the signup REST endpoint enforces (auth_handlers.go's signupRequest, min=8;
