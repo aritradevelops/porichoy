@@ -98,3 +98,10 @@ func Authorization() fiber.Handler {
 func actorFromLocals(c *fiber.Ctx) actor.Actor {
 	return c.Locals(localsActor).(actor.Actor)
 }
+
+// tenantFromLocals extracts the *tenant.Tenant TenantResolution resolved. Unlike
+// actorFromLocals, this is usable behind TenantResolution alone — signup runs before any
+// principal/actor exists, so it only ever has this much of the chain.
+func tenantFromLocals(c *fiber.Ctx) *tenant.Tenant {
+	return c.Locals(localsTenant).(*tenant.Tenant)
+}

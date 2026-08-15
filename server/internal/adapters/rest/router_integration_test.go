@@ -13,11 +13,28 @@ import (
 	"time"
 
 	"github.com/aritradevelops/porichoy/server/internal/actor"
+	"github.com/aritradevelops/porichoy/server/internal/adapters/crypto"
 	"github.com/aritradevelops/porichoy/server/internal/adapters/postgres"
+	"github.com/aritradevelops/porichoy/server/internal/identity"
 	"github.com/aritradevelops/porichoy/server/internal/tenant"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 )
+
+// newIdentityService wires a real identity.Service from Postgres repositories — none of the
+// tests in this file exercise signup itself (that's auth_handlers_test.go's job), but rest.New
+// always requires one, same as tenantSvc.
+func newIdentityService() *identity.Service {
+	return identity.NewService(
+		postgres.NewUserRepository(testDB),
+		postgres.NewPasswordRepository(testDB),
+		postgres.NewAppRepository(testDB),
+		postgres.NewSessionRepository(testDB),
+		postgres.NewRoleAssignmentRepository(testDB),
+		crypto.NewIssuer(),
+		postgres.NewTxRunner(testDB),
+	)
+}
 
 // seedTenant inserts a tenant and one domain for it directly through the real Postgres
 // repositories — bootstrapping a resolvable Host is a precondition every authenticated
@@ -109,7 +126,7 @@ func doRequest(t *testing.T, app interface {
 
 func TestIntegration_TenantLifecycle(t *testing.T) {
 	svc, tenantID := seedTenant(t, "lifecycle.example.com")
-	app := New(svc)
+	app := New(svc, newIdentityService())
 
 	// Create a child tenant under the resolved one.
 	status, env := doRequest(t, app, http.MethodPost, "lifecycle.example.com", "/api/v1/tenants/create",
@@ -149,7 +166,7 @@ func TestIntegration_TenantLifecycle(t *testing.T) {
 
 func TestIntegration_DescendantScope_ReachesDescendantButNotSibling(t *testing.T) {
 	svc, _, _, grandchildID, rootDomain := seedTenantTree(t)
-	app := New(svc)
+	app := New(svc, newIdentityService())
 
 	// tree-root's resolved actor (tenant scope) can reach a grandchild it didn't directly
 	// create — AUTHORIZATION_MODEL.md §4's descendant-access rule, driven by the
@@ -168,7 +185,7 @@ func TestIntegration_DescendantScope_ReachesDescendantButNotSibling(t *testing.T
 
 func TestIntegration_DomainsRegister_DescendantScope(t *testing.T) {
 	svc, _, _, grandchildID, rootDomain := seedTenantTree(t)
-	app := New(svc)
+	app := New(svc, newIdentityService())
 
 	// tree-root's resolved actor (tenant scope) can register a domain for the grandchild
 	// tenant it didn't directly create — same descendant-access rule as the tenants module,

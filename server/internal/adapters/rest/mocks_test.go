@@ -51,6 +51,12 @@ func (m *mockTenantRepo) ListChildren(ctx context.Context, act actor.Actor, pare
 	return list, args.Error(1)
 }
 
+func (m *mockTenantRepo) List(ctx context.Context, act actor.Actor, params tenant.ListParams) (tenant.ListResult, error) {
+	args := m.Called(ctx, act, params)
+	result, _ := args.Get(0).(tenant.ListResult)
+	return result, args.Error(1)
+}
+
 type mockDomainRepo struct{ mock.Mock }
 
 func (m *mockDomainRepo) Create(ctx context.Context, act actor.Actor, d *tenant.TenantDomain) error {

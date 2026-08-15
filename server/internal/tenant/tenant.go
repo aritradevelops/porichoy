@@ -121,4 +121,29 @@ type Repository interface {
 	// ListChildren returns the direct children of parentID — one level of the
 	// hierarchy, not the full subtree.
 	ListChildren(ctx context.Context, act actor.Actor, parentID uuid.UUID) ([]*Tenant, error)
+	// List returns one page of every tenant act is authorized to see, flat rather than
+	// scoped to one parent's direct children: for root scope, every tenant in the system;
+	// for tenant scope, act's own tenant plus its full subtree (AUTHORIZATION_MODEL.md §4).
+	// This backs the root-admin "all tenants" listing
+	// (USER_JOURNEYS_ADMIN_TENANT_MANAGEMENT.md §2) — distinct from ListChildren's one-level
+	// drill-down. params is expected already normalized (Service.ListTenants does this) —
+	// Page >= 1, PageSize within bounds.
+	List(ctx context.Context, act actor.Actor, params ListParams) (ListResult, error)
+}
+
+// ListParams paginates Repository.List. Page is 1-indexed.
+type ListParams struct {
+	Page     int
+	PageSize int
+}
+
+// ListResult is Repository.List's paginated result: Items is this page's rows, Total is the
+// count of every row act is authorized to see across all pages (for computing page count:
+// ceil(Total / PageSize)), and Page/PageSize echo back the params actually used to produce
+// this result.
+type ListResult struct {
+	Items    []*Tenant
+	Total    int
+	Page     int
+	PageSize int
 }

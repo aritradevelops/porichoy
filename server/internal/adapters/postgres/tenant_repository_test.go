@@ -4,6 +4,7 @@ package postgres
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -297,4 +298,95 @@ func TestTenantRepository_ListChildren_UnrelatedParentDenied(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Empty(t, children)
+}
+
+func TestTenantRepository_List_RootSeesEveryTenant(t *testing.T) {
+	repo := NewTenantRepository(testDB)
+	ctx := context.Background()
+	root := rootActor()
+
+	parent := mustCreateRoot(t, repo, "Parent")
+	child := mustCreateChild(t, repo, root, "Child", parent.ID)
+	other := mustCreateRoot(t, repo, "Other")
+
+	got, err := repo.List(ctx, root, tenant.ListParams{Page: 1, PageSize: 1000})
+
+	require.NoError(t, err)
+	ids := make([]uuid.UUID, len(got.Items))
+	for i, tt := range got.Items {
+		ids[i] = tt.ID
+	}
+	assert.Subset(t, ids, []uuid.UUID{parent.ID, child.ID, other.ID})
+	assert.GreaterOrEqual(t, got.Total, 3)
+}
+
+func TestTenantRepository_List_TenantScopeSeesOnlySelfAndDescendants(t *testing.T) {
+	repo := NewTenantRepository(testDB)
+	ctx := context.Background()
+	root := rootActor()
+
+	self := mustCreateRoot(t, repo, "Self")
+	child := mustCreateChild(t, repo, root, "Child", self.ID)
+	grandchild := mustCreateChild(t, repo, root, "Grandchild", child.ID)
+	unrelated := mustCreateRoot(t, repo, "Unrelated")
+
+	act := actor.Actor{PrincipalID: uuid.New(), TenantID: self.ID, Scope: actor.ScopeTenant}
+	got, err := repo.List(ctx, act, tenant.ListParams{Page: 1, PageSize: 1000})
+
+	require.NoError(t, err)
+	assert.Equal(t, 3, got.Total)
+	ids := make([]uuid.UUID, len(got.Items))
+	for i, tt := range got.Items {
+		ids[i] = tt.ID
+	}
+	assert.ElementsMatch(t, []uuid.UUID{self.ID, child.ID, grandchild.ID}, ids)
+	assert.NotContains(t, ids, unrelated.ID)
+}
+
+func TestTenantRepository_List_NonTenantScopeDenied(t *testing.T) {
+	repo := NewTenantRepository(testDB)
+	ctx := context.Background()
+	self := mustCreateRoot(t, repo, "Self")
+
+	act := actor.Actor{PrincipalID: uuid.New(), TenantID: self.ID, Scope: actor.ScopeOrg}
+	got, err := repo.List(ctx, act, tenant.ListParams{Page: 1, PageSize: 10})
+
+	require.NoError(t, err)
+	assert.Equal(t, 0, got.Total)
+	assert.Empty(t, got.Items)
+}
+
+func TestTenantRepository_List_PaginatesWithoutDuplicatesOrGaps(t *testing.T) {
+	repo := NewTenantRepository(testDB)
+	ctx := context.Background()
+	root := rootActor()
+
+	self := mustCreateRoot(t, repo, "Paginate Self")
+	wantIDs := []uuid.UUID{self.ID}
+	for i := range 5 {
+		child := mustCreateChild(t, repo, root, fmt.Sprintf("Paginate Child %d", i), self.ID)
+		wantIDs = append(wantIDs, child.ID)
+	}
+	act := actor.Actor{PrincipalID: uuid.New(), TenantID: self.ID, Scope: actor.ScopeTenant}
+
+	seen := map[uuid.UUID]bool{}
+	for page := 1; page <= 4; page++ {
+		got, err := repo.List(ctx, act, tenant.ListParams{Page: page, PageSize: 2})
+		require.NoError(t, err)
+		assert.Equal(t, 6, got.Total)
+		if page <= 3 {
+			assert.Len(t, got.Items, 2)
+		} else {
+			assert.Empty(t, got.Items, "page beyond the last full page should be empty")
+		}
+		for _, tt := range got.Items {
+			assert.Falsef(t, seen[tt.ID], "tenant %s returned on more than one page", tt.ID)
+			seen[tt.ID] = true
+		}
+	}
+	gotIDs := make([]uuid.UUID, 0, len(seen))
+	for id := range seen {
+		gotIDs = append(gotIDs, id)
+	}
+	assert.ElementsMatch(t, wantIDs, gotIDs)
 }

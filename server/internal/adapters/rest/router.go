@@ -1,20 +1,22 @@
 package rest
 
 import (
+	"github.com/aritradevelops/porichoy/server/internal/identity"
 	"github.com/aritradevelops/porichoy/server/internal/tenant"
 	"github.com/gofiber/fiber/v2"
 )
 
 // New builds the Fiber app and registers every route (CODING_STANDARDS.md §5 — routes are
-// registered explicitly, one per module/action, no dynamic dispatch). Takes tenant.Service
-// directly rather than a Postgres-specific type, so this adapter stays swappable
-// (CODING_STANDARDS.md §2) — cmd/server/main.go is the only place that knows Postgres is
-// the backing store.
-func New(tenantSvc *tenant.Service) *fiber.App {
+// registered explicitly, one per module/action, no dynamic dispatch). Takes tenant.Service/
+// identity.Service directly rather than Postgres-specific types, so this adapter stays
+// swappable (CODING_STANDARDS.md §2) — cmd/server/main.go is the only place that knows
+// Postgres is the backing store.
+func New(tenantSvc *tenant.Service, identitySvc *identity.Service) *fiber.App {
 	app := fiber.New()
 
 	tenants := NewTenantHandlers(tenantSvc)
 	domains := NewDomainHandlers(tenantSvc)
+	auth := NewAuthHandlers(identitySvc)
 
 	api := app.Group("/api/v1")
 
@@ -25,9 +27,16 @@ func New(tenantSvc *tenant.Service) *fiber.App {
 	// the first place.
 	api.Get("/domains/resolve", domains.Resolve)
 
+	// Tenant-resolved but not-yet-authenticated routes — signup is how a caller *becomes*
+	// authenticated, so only TenantResolution runs; Authentication/Authorization have
+	// nothing to check yet (no principal exists until Signup creates one).
+	public := api.Group("", TenantResolution(tenantSvc))
+	public.Post("/auth/signup", auth.Signup)
+
 	// Authenticated/authorized routes — full three-stage chain (CODING_STANDARDS.md §5).
 	authed := api.Group("", TenantResolution(tenantSvc), Authentication(), Authorization())
 	authed.Post("/tenants/create", tenants.Create)
+	authed.Get("/tenants/list", tenants.List)
 	authed.Get("/tenants/get/:id", tenants.Get)
 	authed.Post("/tenants/configure/:id", tenants.Configure)
 	authed.Post("/domains/register", domains.Register)

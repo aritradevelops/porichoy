@@ -31,12 +31,16 @@ type envelopeError struct {
 // this adapter currently raises, not a general i18n solution. A key with no entry here
 // falls back to itself, so a response is never left with an empty message.
 var messages = map[string]string{
-	"tenant.not_found":                 "Tenant not found.",
-	"tenant.domain_already_registered": "This domain is already registered to a tenant.",
-	"tenant.unresolved_domain":         "No tenant is registered for this domain.",
-	"domain.not_found":                 "No tenant is registered for this domain.",
-	"domain.forbidden":                 "You can only register a domain for your own tenant.",
-	"validation.invalid_body":          "The request body is malformed.",
+	"tenant.not_found":                  "Tenant not found.",
+	"tenant.domain_already_registered":  "This domain is already registered to a tenant.",
+	"tenant.unresolved_domain":          "No tenant is registered for this domain.",
+	"domain.not_found":                  "No tenant is registered for this domain.",
+	"domain.forbidden":                  "You can only register a domain for your own tenant.",
+	"identity.login_method_disabled":    "This tenant doesn't allow email/password sign-up.",
+	"identity.email_already_registered": "An account with this email already exists.",
+	"identity.system_app_not_found":     "This tenant isn't fully set up yet. Please contact your administrator.",
+	"identity.password_too_long":        "Password must be 72 characters or fewer.",
+	"validation.invalid_body":           "The request body is malformed.",
 	"validation.failed":                "The request failed validation.",
 	"internal.error":                   "Something went wrong. Please try again.",
 }

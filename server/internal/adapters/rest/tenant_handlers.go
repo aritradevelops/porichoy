@@ -102,6 +102,42 @@ func (h *TenantHandlers) Get(c *fiber.Ctx) error {
 	return success(c, http.StatusOK, toTenantResponse(t))
 }
 
+// tenantListResponse is GET /api/v1/tenants/list's response — Total/Page/PageSize let a
+// caller compute page count (ceil(Total / PageSize)) without a separate count request.
+type tenantListResponse struct {
+	Items    []tenantResponse `json:"items"`
+	Total    int              `json:"total"`
+	Page     int              `json:"page"`
+	PageSize int              `json:"page_size"`
+}
+
+// List handles GET /api/v1/tenants/list?page=&page_size= (permission tenants:list) — one
+// page of every tenant the caller is authorized to see (root: all; tenant scope: itself plus
+// its subtree), backing the root-admin "all tenants" table
+// (USER_JOURNEYS_ADMIN_TENANT_MANAGEMENT.md §2). Both query params are optional —
+// tenant.Service.ListTenants normalizes missing/out-of-range values, this handler just parses
+// whatever's given (or fiber's own zero-value default) straight through.
+func (h *TenantHandlers) List(c *fiber.Ctx) error {
+	params := tenant.ListParams{
+		Page:     c.QueryInt("page", 1),
+		PageSize: c.QueryInt("page_size", 0),
+	}
+	result, err := h.svc.ListTenants(c.Context(), actorFromLocals(c), params)
+	if err != nil {
+		return fail(c, err)
+	}
+	items := make([]tenantResponse, len(result.Items))
+	for i, t := range result.Items {
+		items[i] = toTenantResponse(t)
+	}
+	return success(c, http.StatusOK, tenantListResponse{
+		Items:    items,
+		Total:    result.Total,
+		Page:     result.Page,
+		PageSize: result.PageSize,
+	})
+}
+
 // configureTenantRequest is POST /api/v1/tenants/configure/:id's body — mirrors
 // tenant.Config field-for-field: every field is a pointer, nil means "leave unchanged"
 // (partial update, USER_JOURNEYS_ADMIN_TENANT_MANAGEMENT.md §3), except

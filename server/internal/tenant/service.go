@@ -80,6 +80,32 @@ func (s *Service) GetTenant(ctx context.Context, act actor.Actor, id uuid.UUID) 
 	return s.tenants.GetByID(ctx, act, id)
 }
 
+// Pagination bounds for ListTenants — kept small since the REST layer has no other
+// pagination endpoint yet to share a convention with (AUTHORIZATION_MODEL.md has no
+// documented default; this is the first list-with-many-rows route in this bounded context).
+const (
+	defaultTenantListPageSize = 20
+	maxTenantListPageSize     = 100
+)
+
+// ListTenants returns one page of every tenant act is authorized to see — every tenant for
+// root scope, act's own tenant plus its subtree for tenant scope (Repository.List).
+// Normalizes params here (Page clamped to >=1; PageSize clamped to
+// [1, maxTenantListPageSize], defaulting to defaultTenantListPageSize when <= 0) so neither
+// the REST layer nor the repository has to.
+func (s *Service) ListTenants(ctx context.Context, act actor.Actor, params ListParams) (ListResult, error) {
+	if params.Page < 1 {
+		params.Page = 1
+	}
+	if params.PageSize <= 0 {
+		params.PageSize = defaultTenantListPageSize
+	}
+	if params.PageSize > maxTenantListPageSize {
+		params.PageSize = maxTenantListPageSize
+	}
+	return s.tenants.List(ctx, act, params)
+}
+
 // ResolveTenantByDomain resolves which tenant owns the given origin — the tenant-resolution
 // lookup every incoming request goes through (TECHNICAL_DESIGN §3.3). Returns nil, nil if
 // no tenant has registered this domain, rather than an error — "not found" is an expected
