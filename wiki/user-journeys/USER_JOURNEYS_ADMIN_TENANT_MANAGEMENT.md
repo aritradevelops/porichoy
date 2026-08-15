@@ -15,13 +15,18 @@ account before anyone can log into anything — the unified UI itself requires a
 authenticated tenant session to render past the login screen, so this first account can't
 be created through the normal self-service signup flow.
 
-**Decided: a one-time CLI seed command.** It interactively prompts for the root tenant's
-default login configuration — at minimum, which login method to bootstrap with (e.g.
-email+password) and the credentials for the initial root superadmin account under that
-method. Running it creates:
+**Decided: a one-time CLI seed command (`cmd/seed`).** It interactively prompts for the root
+tenant's name, its first domain (needed before *any* request can resolve to it at all —
+TenantResolution matches every request's Host header against a registered domain,
+TECHNICAL_DESIGN §3.3), and the credentials for the initial root superadmin account. Running
+it creates, all in one transaction so a failure partway leaves nothing behind to collide with
+a rerun:
 
-- the root `tenant` row (`parent_id` null), with enough of its login-method config to
-  actually authenticate (§3 covers configuring the rest later, from the UI);
+- the root `tenant` row (`parent_id` null), with email+password already enabled as its login
+  method — the only method `identity.Service` actually implements so far, not a choice the
+  CLI prompts for (§3 covers configuring the rest — branding, MFA policy, additional login
+  methods once they exist — later, from the UI);
+- its first registered `domain_registry` row, the one the operator supplied;
 - an **internal app**, owned by the root tenant — this is Porichoy's own admin console,
   and administering the platform itself (creating tenants, etc.) works reflexively through
   the exact same role/permission mechanism as everything else in this system, not a special
@@ -32,10 +37,12 @@ method. Running it creates:
   the internal app's `default_signup_role_id`, per §5);
 - one `user` row (the initial root superadmin), holding the seeded Super Admin role.
 
-Once the seed completes, the root superadmin logs into the UI with those credentials and
-continues everything else — creating brand tenants, configuring their login methods, etc.
-(§2 onward) — from there. The CLI is only ever used for this one bootstrap step, not for
-ongoing tenant/app management.
+Once the seed completes, the root superadmin can log in — via `POST /api/v1/auth/login`
+against the domain just registered, with Login itself caching their permissions so
+subsequent authenticated calls resolve for real (AUTHORIZATION_MODEL.md §2) — and continues
+everything else — creating brand tenants, configuring their login methods, etc. (§2 onward)
+— from there. The CLI is only ever used for this one bootstrap step, not for ongoing
+tenant/app management.
 
 ## 2. Journey: Create a Brand Tenant
 
@@ -126,9 +133,9 @@ sequenceDiagram
 
     note over Root,CLI: Bootstrap (one-time, CLI only)
     Root->>CLI: Run seed command
-    CLI->>Root: Prompt for root tenant's login method + admin credentials
+    CLI->>Root: Prompt for root tenant name, domain, + admin credentials
     Root->>CLI: Provide answers
-    CLI->>AI: Create root tenant + login config + internal app
+    CLI->>AI: Create root tenant + domain + login config + internal app
     CLI->>AI: Seed internal app roles (Super Admin, Tenant Admin, User)
     CLI->>AI: Create root superadmin user, assign Super Admin role
 

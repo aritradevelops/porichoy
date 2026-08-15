@@ -176,6 +176,16 @@ non-visibility to app-scoped admins is actually enforced at the query-filter lev
   revocation and the self-service "view active sessions" feature (PRD §9.4) remain accurate
   even across cache eviction/restarts.
 
+**Current implementation status**: the target design above is only partially built.
+`internal/adapters/crypto.Issuer` implements HS256 only — `App.SigningAlgorithm` accepts
+any value, but `Issue`/`Verify` return `ErrUnsupportedSigningAlgorithm` for anything else, so
+RS256/RS512/ES256 and bring-your-own key pair/JWKS are still target design, not shipped.
+There's no admin dashboard yet to provision key material either way (no UI exists in this
+codebase pass at all — `internal/adapters/rest` is REST-API-only so far). A session's
+refresh token is minted and its hash persisted (`app.NewRefreshToken`, `Session.RefreshTokenHash`)
+by Signup/Login, but there is no `POST /auth/refresh` endpoint yet, so rotate-on-use/reuse
+detection has nothing to run against — revisit once that endpoint exists.
+
 ## 5. Authentication Methods — Implementation
 
 - **Password hashing**: bcrypt.
@@ -198,10 +208,20 @@ non-visibility to app-scoped admins is actually enforced at the query-filter lev
 
 ## 6. Permissions Engine
 
-- **Evaluation model**: precomputed and cached. A user's effective permissions and policies
-  are materialized in the cache provider (default Redis, per §2) when roles/assignments
-  change, rather than recomputed live on every call — the runtime permissions API reads from
-  this cache.
+- **Evaluation model**: precomputed and cached. A user's effective permissions are
+  materialized in the cache provider (default Redis, per §2) rather than recomputed live on
+  every call. **Current implementation**: materialization happens at Login only
+  (`authorization.Service.CacheUserPermissions`, called from `AuthHandlers.Login`) — there is
+  no recompute-on-role/assignment-change path yet, so a role edit doesn't take effect for an
+  already-logged-in user until their next login (their cache entry also naturally expires
+  with their access token, per its TTL). Cached as a JSON-array-stringified list of
+  `{module}:{action}@{scope}` strings under a key scoped by app + user id (an app owns its
+  own role/permission catalog); **only permissions are cached, not policies** — policy
+  evaluation/return isn't built yet. What reads this cache today is this server's own
+  `Authenticate` middleware, checking permissions for its own admin/tenant-management REST
+  routes (AUTHORIZATION_MODEL.md §2) — the separate third-party-facing "runtime permissions
+  API" described below, which a client app would call to fetch a user's permissions
+  independently, doesn't exist yet; both are meant to read the same cache once it does.
 - **Latency target**: no hard SLA set — design for correctness first, revisit once real usage
   patterns exist. Deliberately left open rather than a placeholder gap.
 - **Roles vs. Permissions vs. Policies**: a role can carry permissions (string identifiers),
@@ -251,7 +271,11 @@ non-visibility to app-scoped admins is actually enforced at the query-filter lev
 
 - **Encryption at rest**: an application-level encryption port/adapter (consistent with the
   hexagonal architecture) encrypts sensitive fields (phone numbers, TOTP secrets, provider
-  API keys) before they reach Postgres, rather than relying on database-level encryption.
+  API keys, app signing key material) before they reach Postgres, rather than relying on
+  database-level encryption. **Current implementation**: this port doesn't exist yet — an
+  app's `signing_key_config` (DATA_MODEL.md `apps`) is stored as plaintext bytes today
+  (`internal/adapters/crypto.Issuer` reads it directly), not through an encryption port. The
+  column is still named `signing_key_config_encrypted` for the target shape once this lands.
 - **Secrets management**: env vars/config file by default, with a pluggable secrets-provider
   port so production deployments can swap in Vault/KMS without changing core logic.
 - **CSRF/XSS responsibility split**: Porichoy's responsibility ends at its own API
