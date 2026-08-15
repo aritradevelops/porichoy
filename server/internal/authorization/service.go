@@ -2,8 +2,9 @@ package authorization
 
 import (
 	"context"
-	"encoding/json"
+	"fmt"
 	"net/http"
+	"regexp"
 	"strings"
 	"time"
 
@@ -11,6 +12,16 @@ import (
 	"github.com/aritradevelops/porichoy/server/internal/apperror"
 	"github.com/google/uuid"
 )
+
+// validScopes are every actor.Scope name recognized in a permission string's @scope position
+// (AUTHORIZATION_MODEL.md §3) — bounds ResolveScope's regex match to well-formed entries.
+var validScopes = []string{
+	string(actor.ScopeRoot),
+	string(actor.ScopeTenant),
+	string(actor.ScopeApp),
+	string(actor.ScopeOrg),
+	string(actor.ScopeOwn),
+}
 
 // Service implements the authorization module's bootstrap use cases — role and
 // role-assignment creation for the CLI seed command — resolving/caching a principal's
@@ -118,11 +129,14 @@ func (s *Service) CacheUserPermissions(ctx context.Context, appID, userID uuid.U
 // it matches this module+action at any scope.
 var ErrForbidden = apperror.New("authorization.forbidden", http.StatusForbidden)
 
-// ResolveScope is the runtime permission check (AUTHORIZATION_MODEL.md §2): looks up
-// userID's cached permissions for appID, finds every one matching
-// {module}:{action}@* — including a {module}:*@* wildcard action — and returns the broadest
-// matching scope (§3). Returns ErrForbidden if the cache has nothing for this principal, or
-// nothing in it matches.
+// ResolveScope is the runtime permission check (AUTHORIZATION_MODEL.md §2). Mirrors this
+// project's own prior Node implementation
+// (application/src/middlewares/auth.middleware.ts): rather than unmarshal the cached value
+// into a []string first, it regex-matches `"{module}:{action}@{scope}"` (or a
+// `{module}:*@{scope}` wildcard action) directly against the raw JSON-array bytes
+// GetUserPermissions returns — there's nothing else in that value worth a structured decode
+// for, so skip it entirely. Returns the broadest matching scope (§3), or ErrForbidden if the
+// cache has nothing for this principal, or nothing in it matches.
 func (s *Service) ResolveScope(ctx context.Context, appID, userID uuid.UUID, module, action string) (actor.Scope, error) {
 	raw, err := s.cache.GetUserPermissions(ctx, appID, userID)
 	if err != nil {
@@ -132,36 +146,25 @@ func (s *Service) ResolveScope(ctx context.Context, appID, userID uuid.UUID, mod
 		return "", ErrForbidden
 	}
 
-	var permissions []string
-	if err := json.Unmarshal(raw, &permissions); err != nil {
+	// module/action come from the request path (moduleActionFromPath) — QuoteMeta them so a
+	// segment containing regex metacharacters can't alter the pattern being matched.
+	pattern := fmt.Sprintf(`"%s:(%s|\*)@(%s)"`,
+		regexp.QuoteMeta(module), regexp.QuoteMeta(action), strings.Join(validScopes, "|"))
+	re, err := regexp.Compile(pattern)
+	if err != nil {
 		return "", err
+	}
+	matches := re.FindAllSubmatch(raw, -1)
+	if len(matches) == 0 {
+		return "", ErrForbidden
 	}
 
 	var best actor.Scope
-	matched := false
-	for _, p := range permissions {
-		permModule, permAction, scope, ok := parsePermission(p)
-		if !ok || permModule != module || (permAction != action && permAction != "*") {
-			continue
+	for i, m := range matches {
+		scope := actor.Scope(m[2])
+		if i == 0 || scope.AtLeast(best) {
+			best = scope
 		}
-		if !matched || actor.Scope(scope).AtLeast(best) {
-			best = actor.Scope(scope)
-			matched = true
-		}
-	}
-	if !matched {
-		return "", ErrForbidden
 	}
 	return best, nil
-}
-
-// parsePermission splits a "module:action@scope" permission string into its three parts —
-// ok is false if either separator is missing.
-func parsePermission(p string) (module, action, scope string, ok bool) {
-	moduleAction, scope, ok := strings.Cut(p, "@")
-	if !ok {
-		return "", "", "", false
-	}
-	module, action, ok = strings.Cut(moduleAction, ":")
-	return module, action, scope, ok
 }

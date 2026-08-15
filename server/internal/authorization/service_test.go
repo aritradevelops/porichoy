@@ -162,3 +162,40 @@ func TestService_ResolveScope_NoMatchingModule(t *testing.T) {
 
 	require.ErrorIs(t, err, ErrForbidden)
 }
+
+func TestService_ResolveScope_DoesNotMatchPartialModuleName(t *testing.T) {
+	roles := &mockRoleRepo{}
+	assignments := &mockRoleAssignmentRepo{}
+	permCache := &mockPermissionCache{}
+	svc := NewService(roles, assignments, permCache)
+	appID, userID := uuid.New(), uuid.New()
+
+	// "tenants_extra" must not satisfy a "tenants" lookup — proves the match is anchored to
+	// the whole module segment (via the surrounding quotes), not a substring search.
+	permCache.On("GetUserPermissions", mock.Anything, appID, userID).
+		Return([]byte(`["tenants_extra:*@root"]`), nil)
+
+	_, err := svc.ResolveScope(context.Background(), appID, userID, "tenants", "create")
+
+	require.ErrorIs(t, err, ErrForbidden)
+}
+
+func TestService_ResolveScope_ModuleWithRegexMetacharactersIsTreatedLiterally(t *testing.T) {
+	roles := &mockRoleRepo{}
+	assignments := &mockRoleAssignmentRepo{}
+	permCache := &mockPermissionCache{}
+	svc := NewService(roles, assignments, permCache)
+	appID, userID := uuid.New(), uuid.New()
+
+	// module/action come straight from the URL path (moduleActionFromPath) — a caller could
+	// send a path segment containing regex metacharacters. ".*" must not act as a wildcard
+	// glob over module names here; QuoteMeta should make it match only the literal string
+	// ".*", which isn't present, so this must still be forbidden rather than matching
+	// "tenants" through an unintended wildcard.
+	permCache.On("GetUserPermissions", mock.Anything, appID, userID).
+		Return([]byte(`["tenants:*@root"]`), nil)
+
+	_, err := svc.ResolveScope(context.Background(), appID, userID, ".*", "create")
+
+	require.ErrorIs(t, err, ErrForbidden)
+}
