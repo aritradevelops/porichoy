@@ -31,15 +31,20 @@ func NewService(
 // (USER_JOURNEYS_ADMIN_TENANT_MANAGEMENT.md §1) and only ever runs once, before any
 // principal or actor.Actor exists at all — so, unlike CreateTenant, it takes no actor.Actor.
 // ParentID, CreatedBy, and UpdatedBy are all nil (system-generated, DATA_MODEL.md §0).
+// EnabledLoginMethods defaults to email+password — the only method identity.Service actually
+// implements this pass — so the seeded root superadmin can log in immediately afterward;
+// without this, ConfigureTenant (the only other way to set it) is itself an authenticated
+// route nothing could reach yet.
 func (s *Service) CreateRootTenant(ctx context.Context, name string) (*Tenant, error) {
 	now := time.Now()
 	t := &Tenant{
-		ID:          uuid.New(),
-		ParentID:    nil,
-		Name:        name,
-		LoginLayout: LoginLayoutCentered, // sane default until configured via §3
-		CreatedAt:   now,
-		UpdatedAt:   now,
+		ID:                  uuid.New(),
+		ParentID:            nil,
+		Name:                name,
+		LoginLayout:         LoginLayoutCentered, // sane default until configured via §3
+		EnabledLoginMethods: []LoginMethod{LoginMethodEmailPassword},
+		CreatedAt:           now,
+		UpdatedAt:           now,
 	}
 	if err := s.tenants.CreateRoot(ctx, t); err != nil {
 		return nil, err
@@ -119,6 +124,33 @@ func (s *Service) ResolveTenantByDomain(ctx context.Context, domain string) (*Te
 		return nil, nil
 	}
 	return s.tenants.FindByID(ctx, d.TenantID)
+}
+
+// RegisterRootDomain registers domain for tenantID with no actor.Actor — the CLI seed's
+// bootstrap path (USER_JOURNEYS_ADMIN_TENANT_MANAGEMENT.md §1), registering the root
+// tenant's first domain in the same transaction that creates the tenant itself. Without
+// this, a fresh instance would have no domain any Host header could ever resolve to, and
+// RegisterDomain itself is only reachable behind an authenticated route — a deadlock only
+// bootstrap-time code can break.
+func (s *Service) RegisterRootDomain(ctx context.Context, tenantID uuid.UUID, domain string) (*TenantDomain, error) {
+	existing, err := s.domains.FindByDomain(ctx, domain)
+	if err != nil {
+		return nil, err
+	}
+	if existing != nil {
+		return nil, apperror.New("tenant.domain_already_registered", http.StatusConflict)
+	}
+
+	d := &TenantDomain{
+		ID:        uuid.New(),
+		TenantID:  tenantID,
+		Domain:    domain,
+		CreatedAt: time.Now(),
+	}
+	if err := s.domains.CreateRoot(ctx, d); err != nil {
+		return nil, err
+	}
+	return d, nil
 }
 
 // RegisterDomain registers a new allowed origin for tenantID. Domains are unique across

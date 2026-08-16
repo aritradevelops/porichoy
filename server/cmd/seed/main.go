@@ -1,9 +1,12 @@
 // Command seed is the one-time CLI bootstrap step
-// (USER_JOURNEYS_ADMIN_TENANT_MANAGEMENT.md §1): creates the root tenant, its default system
-// app, the three default roles (Super Admin, Tenant Admin, User), and the initial root
-// superadmin user. Run once against a fresh deployment, before anyone can log in — the
-// unified UI itself requires an authenticated tenant session to render past the login
-// screen, so this first account can't be created through the normal signup flow.
+// (USER_JOURNEYS_ADMIN_TENANT_MANAGEMENT.md §1): creates the root tenant, its first
+// registered domain, its default system app, the three default roles (Super Admin, Tenant
+// Admin, User), and the initial root superadmin user — with email+password already enabled
+// and a domain already registered, so the superadmin can log in immediately afterward. Run
+// once against a fresh deployment, before anyone can log in — the unified UI itself requires
+// an authenticated tenant session to render past the login screen, so this first account
+// can't be created through the normal signup flow, and TenantResolution can't resolve any
+// request at all until at least one domain is registered.
 package main
 
 import (
@@ -106,6 +109,10 @@ func main() {
 	if err != nil {
 		log.Fatalf("read tenant name: %v", err)
 	}
+	domain, err := promptDomain(r, "Root tenant domain (e.g. localhost, admin.yourcompany.com)")
+	if err != nil {
+		log.Fatalf("read domain: %v", err)
+	}
 	email, err := promptEmail(r, "Superadmin email")
 	if err != nil {
 		log.Fatalf("read email: %v", err)
@@ -132,6 +139,9 @@ func main() {
 		rootTenant, err = tenantSvc.CreateRootTenant(ctx, tenantName)
 		if err != nil {
 			return fmt.Errorf("create root tenant: %w", err)
+		}
+		if _, err := tenantSvc.RegisterRootDomain(ctx, rootTenant.ID, domain); err != nil {
+			return fmt.Errorf("register root domain: %w", err)
 		}
 
 		sysApp, err = appSvc.CreateSystemApp(ctx, rootTenant.ID, "System")
@@ -171,12 +181,13 @@ func main() {
 	fmt.Println()
 	fmt.Println("Bootstrap complete.")
 	fmt.Printf("  Root tenant: %s (%s)\n", rootTenant.Name, rootTenant.ID)
+	fmt.Printf("  Domain:      %s\n", domain)
 	fmt.Printf("  System app:  %s (client_id %s)\n", sysApp.Name, sysApp.ClientID)
 	fmt.Printf("  Superadmin:  %s (%s)\n", email, rootUser.ID)
 	fmt.Println()
-	fmt.Println("Next: log in via POST /api/v1/auth/login, then pass the returned access_token")
-	fmt.Println("as \"Authorization: Bearer <token>\" (or an access_token cookie) to register a")
-	fmt.Println("domain for this tenant via POST /api/v1/domains/register — Login already cached")
-	fmt.Println("this superadmin's Super Admin permissions, so it authenticates and authorizes")
-	fmt.Println("for real (AUTHORIZATION_MODEL.md §2).")
+	fmt.Printf("Next: log in via POST /api/v1/auth/login against Host: %s, then pass the\n", domain)
+	fmt.Println("returned access_token as \"Authorization: Bearer <token>\" (or an access_token")
+	fmt.Println("cookie) to register further domains via POST /api/v1/domains/register — Login")
+	fmt.Println("already cached this superadmin's Super Admin permissions, so it authenticates")
+	fmt.Println("and authorizes for real (AUTHORIZATION_MODEL.md §2).")
 }

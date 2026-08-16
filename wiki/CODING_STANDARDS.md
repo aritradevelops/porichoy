@@ -166,17 +166,23 @@ any of these.
 - **Routes are registered explicitly**, one per module/action, even though they follow the
   uniform `/api/{version}/{module}/{action}/{id?}` pattern (AUTHORIZATION_MODEL §1) — no
   dynamic dispatch/registry-lookup indirection. Easier to grep a URL straight to its handler.
-- **Middleware is chained, one concern per middleware**: tenant resolution → authentication
-  → authorization (AUTHORIZATION_MODEL §2), as three separate, independently testable Fiber
-  middleware functions in that order — not folded into fewer, larger ones. The authorization
-  middleware is what builds an `actor.Actor` (`internal/actor`, §2) from the resolved
-  tenant/authenticated principal/permission lookup, and hands it to the handler via Fiber
-  `Locals` — the *only* place an `Actor` crosses from Fiber-land into domain code. The
-  handler extracts it immediately and passes it on as an explicit Go parameter from there;
-  domain and adapter code never touches Fiber's request object directly, consistent with
-  entities having zero knowledge of the delivery mechanism (§2). Routes that don't run this
-  full chain (public/pre-authentication ones, e.g. tenant resolution itself) call `Service`
-  methods that simply don't take an `Actor` parameter (§4) — there's nothing to hand off.
+- **Middleware is chained, two stages**: tenant resolution, then a single combined
+  authentication+authorization stage (AUTHORIZATION_MODEL §2) — `TenantResolution` and
+  `Authenticate`, as two separate, independently testable Fiber middleware functions, in
+  that order. An earlier pass split authentication and authorization into two further
+  middlewares of their own (three total); they were merged into one `Authenticate` once
+  authorization had a real permission cache to check against, since verifying the token and
+  resolving the caller's permissions from it are the same round trip in practice, not two
+  independently useful stages — this also matches the shape of this project's own prior Node
+  implementation. `Authenticate` is what builds an `actor.Actor` (`internal/actor`, §2) from
+  the resolved tenant/authenticated principal/permission lookup, and hands it to the handler
+  via Fiber `Locals` — the *only* place an `Actor` crosses from Fiber-land into domain code.
+  The handler extracts it immediately and passes it on as an explicit Go parameter from
+  there; domain and adapter code never touches Fiber's request object directly, consistent
+  with entities having zero knowledge of the delivery mechanism (§2). Routes that don't run
+  this full chain (public/pre-authentication ones, e.g. tenant resolution itself, or Signup/
+  Login) call `Service` methods that simply don't take an `Actor` parameter (§4) — there's
+  nothing to hand off.
 - **Response envelope**, for every success and error response alike:
   ```json
   { "data": ..., "error": { "key": "...", "message": "..." } }

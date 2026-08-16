@@ -22,6 +22,7 @@ func TestService_CreateRootTenant(t *testing.T) {
 	assert.Equal(t, "Root", got.Name)
 	assert.True(t, got.IsRoot())
 	assert.Equal(t, LoginLayoutCentered, got.LoginLayout)
+	assert.Equal(t, []LoginMethod{LoginMethodEmailPassword}, got.EnabledLoginMethods)
 	assert.Nil(t, got.CreatedBy)
 	assert.Nil(t, got.UpdatedBy)
 	tenants.AssertExpectations(t)
@@ -72,6 +73,37 @@ func TestService_CreateTenant_ParentNotFound(t *testing.T) {
 	var appErr *apperror.Error
 	require.ErrorAs(t, err, &appErr)
 	assert.Equal(t, "tenant.not_found", appErr.Key)
+}
+
+func TestService_RegisterRootDomain_OK(t *testing.T) {
+	domains := &mockDomainRepo{}
+	domains.On("FindByDomain", mock.Anything, "root.example.com").Return(nil, nil)
+	domains.On("CreateRoot", mock.Anything, mock.AnythingOfType("*tenant.TenantDomain")).Return(nil)
+	svc := NewService(&mockTenantRepo{}, domains, &mockCredentialRepo{})
+
+	tenantID := uuid.New()
+	got, err := svc.RegisterRootDomain(context.Background(), tenantID, "root.example.com")
+
+	require.NoError(t, err)
+	assert.Equal(t, tenantID, got.TenantID)
+	assert.Equal(t, "root.example.com", got.Domain)
+	assert.Nil(t, got.CreatedBy)
+	domains.AssertExpectations(t)
+}
+
+func TestService_RegisterRootDomain_AlreadyRegistered(t *testing.T) {
+	domains := &mockDomainRepo{}
+	domains.On("FindByDomain", mock.Anything, "root.example.com").
+		Return(&TenantDomain{ID: uuid.New()}, nil)
+	svc := NewService(&mockTenantRepo{}, domains, &mockCredentialRepo{})
+
+	_, err := svc.RegisterRootDomain(context.Background(), uuid.New(), "root.example.com")
+
+	require.Error(t, err)
+	var appErr *apperror.Error
+	require.ErrorAs(t, err, &appErr)
+	assert.Equal(t, "tenant.domain_already_registered", appErr.Key)
+	domains.AssertNotCalled(t, "CreateRoot", mock.Anything, mock.Anything)
 }
 
 func TestService_RegisterDomain_AlreadyRegistered(t *testing.T) {

@@ -18,7 +18,7 @@ import (
 // given — domain_registries and tenant_provider_credentials don't carry their own ancestors
 // column, so the check always goes through this one tenants-table lookup rather than a
 // subquery/join against those tables directly.
-func tenantAccessible(ctx context.Context, db *bun.DB, act actor.Actor, tenantID uuid.UUID) (bool, error) {
+func tenantAccessible(ctx context.Context, db bun.IDB, act actor.Actor, tenantID uuid.UUID) (bool, error) {
 	return withTenantScope(
 		db.NewSelect().Model((*tenantModel)(nil)).Where("id = ?", tenantID).Where("deleted_at IS NULL"),
 		act,

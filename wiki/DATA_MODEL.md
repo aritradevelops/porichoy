@@ -129,6 +129,13 @@ config. A tenant-level login session is issued against the tenant's default syst
 (TECHNICAL_DESIGN §3.5), so it simply inherits *that app's* TTLs; there's no separate
 tenant-wide TTL setting.
 
+**Current implementation** (TECHNICAL_DESIGN §4's "Current implementation status"): only
+`signing_algorithm = HS256` is actually usable — `client_secret_hash` isn't used as the
+signing input, `signing_key_config_encrypted` holds the raw HS256 shared secret; a key
+pair/JWKS reference and non-HS256 algorithms are accepted by the column's shape but rejected
+by `internal/adapters/crypto.Issuer` at runtime. The column also isn't actually encrypted yet
+(TECHNICAL_DESIGN §8) — plaintext bytes, despite the name.
+
 | Column | Type | Notes |
 |---|---|---|
 | `id` | uuid, PK | |
@@ -141,8 +148,8 @@ tenant-wide TTL setting.
 | `is_system` | boolean, default false | true only for the auto-provisioned default system app; non-deletable (TECHNICAL_DESIGN §3.5) |
 | `supports_organizations` | boolean | individual-signup vs. org-enabled app (PRD §6/§7.2) |
 | `default_signup_role_id` | uuid, FK → roles.id, nullable | role auto-assigned to a new user of this app — applies uniformly whether they arrived via individual signup or organization signup (single field, not segregated by signup type); superseded by more specific mechanisms where they apply — the auto-assigned Owner role on org creation (USER_JOURNEYS_ORGANIZATIONS.md §1), or an inviter's explicitly chosen role on invite acceptance (§2) |
-| `signing_algorithm` | enum(`RS256`,`RS512`,`ES256`,...) | per-app (TECHNICAL_DESIGN §4) |
-| `signing_key_config_encrypted` | bytea/jsonb | shared secret, key pair, or JWKS reference — application-level encrypted |
+| `signing_algorithm` | enum(`RS256`,`RS512`,`ES256`,...) | per-app (TECHNICAL_DESIGN §4); only `HS256` is implemented so far, see above |
+| `signing_key_config_encrypted` | bytea/jsonb | shared secret, key pair, or JWKS reference — application-level encrypted once that port exists (currently plaintext, see above) |
 | `access_token_ttl_seconds` | int | default ~900 (TECHNICAL_DESIGN §4) |
 | `id_token_ttl_seconds` | int | |
 | `refresh_token_ttl_seconds` | int | default ~2,592,000 (30 days) |
@@ -173,6 +180,12 @@ session's creator is always its own `user_id` — tracking that separately would
 ## 3. Identity
 
 ### `users`
+Unique index on (`tenant_id`, `email`) `WHERE deleted_at IS NULL AND email IS NOT NULL` — a
+real DB-level guard against two active accounts sharing an email within a tenant, not just
+the application-level pre-check Signup also does (which alone would be TOCTOU-racy under
+concurrent signups). Partial for the same reason as every other soft-deletable unique
+constraint (§0): a soft-deleted account's email frees up for reuse.
+
 | Column | Type | Notes |
 |---|---|---|
 | `id` | uuid, PK | |
