@@ -102,6 +102,39 @@ func TestService_CacheUserPermissions_OK(t *testing.T) {
 	permCache.AssertExpectations(t)
 }
 
+func TestService_CachedPermissions_OK(t *testing.T) {
+	roles := &mockRoleRepo{}
+	assignments := &mockRoleAssignmentRepo{}
+	permCache := &mockPermissionCache{}
+	svc := NewService(roles, assignments, permCache)
+	appID, userID := uuid.New(), uuid.New()
+
+	permCache.On("GetUserPermissions", mock.Anything, appID, userID).
+		Return([]byte(`["tenants:*@root","domains:register@tenant"]`), nil)
+
+	got, err := svc.CachedPermissions(context.Background(), appID, userID)
+
+	require.NoError(t, err)
+	require.Equal(t, []string{"tenants:*@root", "domains:register@tenant"}, got)
+}
+
+func TestService_CachedPermissions_NoCacheEntry(t *testing.T) {
+	roles := &mockRoleRepo{}
+	assignments := &mockRoleAssignmentRepo{}
+	permCache := &mockPermissionCache{}
+	svc := NewService(roles, assignments, permCache)
+	appID, userID := uuid.New(), uuid.New()
+
+	// Unlike ResolveScope, a cache miss here is legitimate empty state, not ErrForbidden — a
+	// validly authenticated caller can simply hold zero grants.
+	permCache.On("GetUserPermissions", mock.Anything, appID, userID).Return(nil, nil)
+
+	got, err := svc.CachedPermissions(context.Background(), appID, userID)
+
+	require.NoError(t, err)
+	require.Equal(t, []string{}, got)
+}
+
 func TestService_ResolveScope_PicksBroadestMatchingScope(t *testing.T) {
 	roles := &mockRoleRepo{}
 	assignments := &mockRoleAssignmentRepo{}

@@ -9,6 +9,7 @@ import (
 	"github.com/aritradevelops/porichoy/server/internal/identity"
 	"github.com/aritradevelops/porichoy/server/internal/tenant"
 	"github.com/gofiber/fiber/v2"
+	"github.com/google/uuid"
 )
 
 // Fiber Locals keys. These are the only place an Actor crosses from Fiber-land into domain
@@ -46,7 +47,7 @@ func extractToken(c *fiber.Ctx) string {
 // authorization even run.
 func TenantResolution(svc *tenant.Service) fiber.Handler {
 	return func(c *fiber.Ctx) error {
-		t, err := svc.ResolveTenantByDomain(c.Context(), c.Hostname())
+		t, err := svc.ResolveTenantByDomain(c.Context(), hostnameWithoutPort(c))
 		if err != nil {
 			return fail(c, err)
 		}
@@ -56,6 +57,20 @@ func TenantResolution(svc *tenant.Service) fiber.Handler {
 		c.Locals(localsTenant, t)
 		return c.Next()
 	}
+}
+
+// hostnameWithoutPort returns c.Hostname() with any ":port" suffix stripped —
+// fiber.Ctx.Hostname() returns the raw Host header value verbatim (fasthttp's
+// URI().Host()), port included when the client sent one, so a request to
+// "admin.example.com:5173" would otherwise fail to match the registered domain
+// "admin.example.com". Domains in this system are DNS hostnames, never IP literals, so a
+// plain split on the last colon is safe (no IPv6 bracket-notation to account for).
+func hostnameWithoutPort(c *fiber.Ctx) string {
+	host := c.Hostname()
+	if i := strings.LastIndexByte(host, ':'); i != -1 {
+		return host[:i]
+	}
+	return host
 }
 
 // Authenticate is the merged authentication+authorization stage — this repo's real
@@ -76,13 +91,7 @@ func TenantResolution(svc *tenant.Service) fiber.Handler {
 //  4. Build the actor.Actor every downstream Service/Repository call needs.
 func Authenticate(identitySvc *identity.Service, authzSvc *authorization.Service) fiber.Handler {
 	return func(c *fiber.Ctx) error {
-		token := extractToken(c)
-		if token == "" {
-			return fail(c, apperror.New("identity.unauthenticated", fiber.StatusUnauthorized))
-		}
-
-		t := tenantFromLocals(c)
-		principalID, appID, err := identitySvc.Authenticate(c.Context(), t, token)
+		principalID, appID, err := verifyToken(c, identitySvc)
 		if err != nil {
 			return fail(c, err)
 		}
@@ -98,9 +107,49 @@ func Authenticate(identitySvc *identity.Service, authzSvc *authorization.Service
 
 		c.Locals(localsActor, actor.Actor{
 			PrincipalID: principalID,
-			TenantID:    t.ID,
+			TenantID:    tenantFromLocals(c).ID,
 			AppID:       &appID,
 			Scope:       scope,
+		})
+		return c.Next()
+	}
+}
+
+// verifyToken extracts and verifies the caller's token — the shared first step of Authenticate
+// and AuthenticateOnly (identity.Service.Authenticate itself, against the tenant
+// TenantResolution already resolved).
+func verifyToken(c *fiber.Ctx, identitySvc *identity.Service) (principalID, appID uuid.UUID, err error) {
+	token := extractToken(c)
+	if token == "" {
+		return uuid.Nil, uuid.Nil, apperror.New("identity.unauthenticated", fiber.StatusUnauthorized)
+	}
+	return identitySvc.Authenticate(c.Context(), tenantFromLocals(c), token)
+}
+
+// AuthenticateOnly verifies the caller's token (verifyToken, same as Authenticate) but runs no
+// {module}:{action}@{scope} permission check — for routes that are authenticated-only, not a
+// permission-gated business operation. Today that's exactly one route, GET /api/v1/auth/me:
+// reading your own identity/permission list can't be permission-gated without a chicken-and-egg
+// problem (checking a permission to learn what permissions you have), and running it through
+// ResolveScope would 403 a validly authenticated caller who simply holds no grants yet —
+// precisely the state that endpoint exists to report truthfully.
+//
+// The Actor this builds has Scope hardcoded to actor.ScopeOwn — not a resolved grant, just
+// documents that whatever a route behind this middleware does, it acts on the caller's own
+// record only (identitySvc.Authenticate resolves principalID off the verified token's own
+// subject claim, never a request-supplied parameter).
+func AuthenticateOnly(identitySvc *identity.Service) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		principalID, appID, err := verifyToken(c, identitySvc)
+		if err != nil {
+			return fail(c, err)
+		}
+
+		c.Locals(localsActor, actor.Actor{
+			PrincipalID: principalID,
+			TenantID:    tenantFromLocals(c).ID,
+			AppID:       &appID,
+			Scope:       actor.ScopeOwn,
 		})
 		return c.Next()
 	}

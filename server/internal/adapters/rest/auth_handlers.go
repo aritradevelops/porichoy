@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/aritradevelops/porichoy/server/internal/apperror"
 	"github.com/aritradevelops/porichoy/server/internal/authorization"
 	"github.com/aritradevelops/porichoy/server/internal/identity"
 	"github.com/gofiber/fiber/v2"
@@ -105,4 +106,49 @@ func (h *AuthHandlers) Login(c *fiber.Ctx) error {
 	}
 
 	return success(c, http.StatusOK, toAuthResponse(result))
+}
+
+// meResponse is GET /api/v1/auth/me's response — the caller's own identity, their current
+// tenant (resolved for free off TenantResolution's own Locals value, no extra query), and
+// their permission list as cached at Login (AUTHORIZATION_MODEL.md §2) — what the frontend
+// hydrates identity display and nav gating from right after login/on app load.
+type meResponse struct {
+	UserID      uuid.UUID `json:"user_id"`
+	Email       string    `json:"email"`
+	DisplayName *string   `json:"display_name"`
+	TenantID    uuid.UUID `json:"tenant_id"`
+	TenantName  string    `json:"tenant_name"`
+	Permissions []string  `json:"permissions"`
+}
+
+// Me handles GET /api/v1/auth/me — registered behind TenantResolution+AuthenticateOnly, not
+// the full Authenticate chain (AuthenticateOnly's own doc comment explains why): reading your
+// own identity/permission list isn't a permission-gated business operation.
+func (h *AuthHandlers) Me(c *fiber.Ctx) error {
+	act := actorFromLocals(c)
+
+	u, err := h.svc.FindByID(c.Context(), act.TenantID, act.PrincipalID)
+	if err != nil {
+		return fail(c, err)
+	}
+	if u == nil {
+		// Token verified, but the account it points at is gone (soft-deleted since issuance) —
+		// collapse into the same 401 as any other invalid-session case, not a distinct error.
+		return fail(c, apperror.New("identity.unauthenticated", fiber.StatusUnauthorized))
+	}
+
+	permissions, err := h.authz.CachedPermissions(c.Context(), *act.AppID, act.PrincipalID)
+	if err != nil {
+		return fail(c, err)
+	}
+
+	t := tenantFromLocals(c)
+	return success(c, http.StatusOK, meResponse{
+		UserID:      u.ID,
+		Email:       *u.Email,
+		DisplayName: u.DisplayName,
+		TenantID:    t.ID,
+		TenantName:  t.Name,
+		Permissions: permissions,
+	})
 }

@@ -34,6 +34,12 @@ func New(tenantSvc *tenant.Service, identitySvc *identity.Service, authzSvc *aut
 	public.Post("/auth/signup", auth.Signup)
 	public.Post("/auth/login", auth.Login)
 
+	// Authenticated-but-not-authorized routes — TenantResolution, then token verification only
+	// (AuthenticateOnly's own doc comment explains why this route doesn't run a permission
+	// check): reading your own identity/permission list, not a permission-gated operation.
+	identified := api.Group("", TenantResolution(tenantSvc), AuthenticateOnly(identitySvc))
+	identified.Get("/auth/me", auth.Me)
+
 	// Authenticated/authorized routes — TenantResolution, then the merged
 	// authentication+authorization stage (CODING_STANDARDS.md §5, AUTHORIZATION_MODEL.md §2).
 	authed := api.Group("", TenantResolution(tenantSvc), Authenticate(identitySvc, authzSvc))

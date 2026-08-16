@@ -2,6 +2,7 @@ package authorization
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"regexp"
@@ -122,6 +123,25 @@ func (s *Service) CacheUserPermissions(ctx context.Context, appID, userID uuid.U
 		return err
 	}
 	return s.cache.SetUserPermissions(ctx, appID, userID, permissions, ttl)
+}
+
+// CachedPermissions returns the plain permission list CacheUserPermissions (Login) cached for
+// appID+userID — backs GET /auth/me. Unlike ResolveScope, a cache miss here is legitimate
+// empty state (nothing cached yet, or expired), not a 403: only ResolveScope's callers (real
+// permission checks) treat a miss as forbidden.
+func (s *Service) CachedPermissions(ctx context.Context, appID, userID uuid.UUID) ([]string, error) {
+	raw, err := s.cache.GetUserPermissions(ctx, appID, userID)
+	if err != nil {
+		return nil, err
+	}
+	if raw == nil {
+		return []string{}, nil
+	}
+	var permissions []string
+	if err := json.Unmarshal(raw, &permissions); err != nil {
+		return nil, err
+	}
+	return permissions, nil
 }
 
 // ErrForbidden is returned by ResolveScope when no cached permission matches — either no

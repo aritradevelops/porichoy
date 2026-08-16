@@ -16,8 +16,10 @@ import {
   UsersRoundIcon,
   type LucideIcon,
 } from 'lucide-react'
-import { NavLink, Outlet, useLocation } from 'react-router-dom'
-import { cn } from '@/lib/utils'
+import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
+import { cn, getInitials } from '@/lib/utils'
+import { useAuth } from '@/lib/client/auth-context'
+import { hasPermission } from '@/lib/client/permissions'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import {
   DropdownMenu,
@@ -33,6 +35,10 @@ interface NavItem {
   label: string
   icon: LucideIcon
   end?: boolean
+  // Set only for items backed by a permission the authorization model actually has a catalog
+  // entry for today (AUTHORIZATION_MODEL.md's {module}:{action}@{scope}) — see adminNavItems'
+  // own comment for why the rest of this list doesn't have one yet.
+  permission?: { module: string; action: string }
 }
 
 // User section (ungrouped, top) — visible to every logged-in user regardless
@@ -44,40 +50,52 @@ const userNavItems: NavItem[] = [
   { to: '/security', label: 'Security', icon: ShieldCheckIcon },
 ]
 
-// Administration group (UI_PAGES.md §0). Each item shown unconditionally here
-// for layout purposes — it should only render for a user actually holding the
-// corresponding admin permission once lib/client exists to check that
-// (TECHNICAL_DESIGN §1's permission-gated-visibility model, AUTHORIZATION_MODEL
-// §2's {module}:{action}@{scope} grants).
+// Administration group (UI_PAGES.md §0), permission-gated per item
+// (AUTHORIZATION_MODEL.md's {module}:{action}@{scope} grants) via hasPermission below.
+//
+// Only Tenants maps to a permission any seeded role actually grants
+// (cmd/seed/main.go's superAdminPermissions/tenantAdminPermissions include "tenants:*@...").
+// Dashboard/Apps have no backing module or REST endpoint yet at all — gating them on an
+// invented permission string would just hide them for every user, including root, since
+// nothing could ever grant it. Gate for real once each module ships its own backend
+// authorization; until then they stay unconditionally visible, same as before this pass.
 const adminNavItems: NavItem[] = [
-  // Gate on a dashboard/metrics-read permission once lib/client exists.
   { to: '/admin', label: 'Dashboard', icon: LayoutDashboardIcon, end: true },
-  // Gate on a tenant-read permission once lib/client exists.
-  { to: '/admin/tenants', label: 'Tenants', icon: Building2Icon },
-  // Gate on an app-read permission once lib/client exists.
+  {
+    to: '/admin/tenants',
+    label: 'Tenants',
+    icon: Building2Icon,
+    permission: { module: 'tenants', action: 'list' },
+  },
   { to: '/admin/apps', label: 'Apps', icon: LayoutGridIcon },
 ]
 
-// Access Control's static sub-list (UI_PAGES.md §7) — each item gates on its
-// own permission once lib/client exists, same as the top-level admin items.
+// Access Control's static sub-list (UI_PAGES.md §7) — same "no backing module yet" reasoning
+// as Dashboard/Apps above; none of roles/permissions/policies has a REST endpoint or
+// permission catalog entry today.
 const accessControlSubItems: NavItem[] = [
-  // Gate on a role-read permission once lib/client exists.
   { to: '/admin/access-control/roles', label: 'Roles', icon: UsersRoundIcon },
-  // Gate on a permission-read permission once lib/client exists.
   {
     to: '/admin/access-control/permissions',
     label: 'Permissions',
     icon: KeyRoundIcon,
   },
-  // Gate on a policy-read permission once lib/client exists.
   { to: '/admin/access-control/policies', label: 'Policies', icon: ScrollTextIcon },
 ]
 
-// Gate on an audit-log-read permission once lib/client exists.
+// No backing module yet — same reasoning as above.
 const auditLogsItem: NavItem = {
   to: '/admin/audit-logs',
   label: 'Audit Logs',
   icon: FileClockIcon,
+}
+
+function visibleNavItems(items: NavItem[], permissions: string[]) {
+  return items.filter(
+    (item) =>
+      !item.permission ||
+      hasPermission(permissions, item.permission.module, item.permission.action),
+  )
 }
 
 function navLinkClassName({ isActive }: { isActive: boolean }) {
@@ -93,14 +111,19 @@ function navLinkClassName({ isActive }: { isActive: boolean }) {
 // edge-to-edge, 1px right border (UI_CODING_STANDARDS.md §5.1).
 export function AppShell() {
   const { pathname } = useLocation()
+  const navigate = useNavigate()
   const accessControlActive = pathname.startsWith('/admin/access-control')
   const [accessControlOpen, setAccessControlOpen] = useState(accessControlActive)
+  const { user, logout } = useAuth()
+  const permissions = user?.permissions ?? []
 
   return (
     <div className="bg-background flex min-h-svh">
       <aside className="bg-sidebar border-sidebar-border flex w-(--sidebar-width) shrink-0 flex-col border-r">
-        {/* Org switcher placeholder — will list the user's actual organizations
-            once lib/client exists (USER_JOURNEYS_ORGANIZATIONS.md §3). */}
+        {/* Org switcher — the trigger label shows the caller's real tenant (from /auth/me),
+            but the dropdown's item list stays a placeholder: Organizations aren't a built
+            feature yet (no orgs endpoint, no features/organizations/), so listing real orgs
+            here would misrepresent scope this pass doesn't cover. */}
         <div className="border-sidebar-border flex h-(--topbar-height) items-center border-b px-4">
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
@@ -112,7 +135,7 @@ export function AppShell() {
                   P
                 </div>
                 <span className="text-sidebar-foreground flex-1 truncate text-sm font-medium">
-                  Acme Corp
+                  {user?.tenant_name ?? 'Loading…'}
                 </span>
                 <ChevronsUpDownIcon className="text-muted-foreground size-4 shrink-0" />
               </button>
@@ -138,12 +161,14 @@ export function AppShell() {
             Administration
           </div>
 
-          {adminNavItems.map(({ to, label, icon: Icon, end }) => (
-            <NavLink key={to} to={to} end={end} className={navLinkClassName}>
-              <Icon className="size-4" />
-              {label}
-            </NavLink>
-          ))}
+          {visibleNavItems(adminNavItems, permissions).map(
+            ({ to, label, icon: Icon, end }) => (
+              <NavLink key={to} to={to} end={end} className={navLinkClassName}>
+                <Icon className="size-4" />
+                {label}
+              </NavLink>
+            ),
+          )}
 
           <button
             type="button"
@@ -167,12 +192,14 @@ export function AppShell() {
           </button>
           {accessControlOpen && (
             <div className="flex flex-col gap-1 pl-6">
-              {accessControlSubItems.map(({ to, label, icon: Icon }) => (
-                <NavLink key={to} to={to} className={navLinkClassName}>
-                  <Icon className="size-4" />
-                  {label}
-                </NavLink>
-              ))}
+              {visibleNavItems(accessControlSubItems, permissions).map(
+                ({ to, label, icon: Icon }) => (
+                  <NavLink key={to} to={to} className={navLinkClassName}>
+                    <Icon className="size-4" />
+                    {label}
+                  </NavLink>
+                ),
+              )}
             </div>
           )}
 
@@ -182,8 +209,7 @@ export function AppShell() {
           </NavLink>
         </nav>
 
-        {/* User menu placeholder — will show the authenticated user's real
-            name/email once lib/client exists. */}
+        {/* User menu — real identity from /auth/me, sourced via useAuth(). */}
         <div className="border-sidebar-border border-t p-3">
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
@@ -192,14 +218,16 @@ export function AppShell() {
                 className="hover:bg-sidebar-accent flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors"
               >
                 <Avatar className="size-7">
-                  <AvatarFallback className="text-xs">JD</AvatarFallback>
+                  <AvatarFallback className="text-xs">
+                    {getInitials(user?.display_name ?? user?.email ?? '')}
+                  </AvatarFallback>
                 </Avatar>
                 <div className="flex-1 truncate">
                   <p className="text-sidebar-foreground truncate text-sm font-medium">
-                    Jane Doe
+                    {user?.display_name ?? user?.email ?? 'Loading…'}
                   </p>
                   <p className="text-muted-foreground truncate text-xs">
-                    jane@example.com
+                    {user?.email ?? ''}
                   </p>
                 </div>
               </button>
@@ -211,7 +239,13 @@ export function AppShell() {
                 </NavLink>
               </DropdownMenuItem>
               <DropdownMenuSeparator />
-              <DropdownMenuItem variant="destructive">
+              <DropdownMenuItem
+                variant="destructive"
+                onClick={() => {
+                  logout()
+                  navigate('/login')
+                }}
+              >
                 <LogOutIcon /> Sign out
               </DropdownMenuItem>
             </DropdownMenuContent>

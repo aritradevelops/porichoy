@@ -299,6 +299,14 @@ func (s *Service) issueTokenPair(sysApp *app.App, t *tenant.Tenant, u *User) (ac
 	return accessToken, idToken, nil
 }
 
+// FindByID returns the user identified by userID within tenantID — backs GET /auth/me.
+// AuthenticateOnly resolves userID off the caller's own verified token, never a
+// caller-supplied parameter, so there's no separate authorization check to perform here.
+// Returns nil, nil if no active user with this id exists within tenantID.
+func (s *Service) FindByID(ctx context.Context, tenantID, userID uuid.UUID) (*User, error) {
+	return s.users.FindByID(ctx, tenantID, userID)
+}
+
 // CreateRootUser creates the CLI seed's root superadmin — User + Password only, no
 // session/tokens (they log in via the UI afterward, through Login). Skips
 // Signup's enabled-login-methods check since bootstrap predates tenant configuration.
