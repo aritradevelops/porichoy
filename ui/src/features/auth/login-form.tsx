@@ -6,6 +6,7 @@ import { z } from 'zod'
 import { ApiError } from '@/lib/client/http'
 import { useAuth } from '@/lib/client/auth-context'
 import { useLoginMutation } from '@/lib/client/auth'
+import { resolveErrorMessage } from '@/lib/client/error-messages'
 import type { LocationWithFrom } from '@/lib/client/require-auth'
 import { AppleIcon, GoogleIcon } from '@/components/brand-icons'
 import { Button } from '@/components/ui/button'
@@ -142,7 +143,10 @@ export function LoginForm() {
             <Field>
               {loginMutation.error instanceof ApiError && (
                 <p className="text-destructive text-center text-sm" role="alert">
-                  {loginMutation.error.message}
+                  {resolveErrorMessage(
+                    loginMutation.error.key,
+                    loginMutation.error.message,
+                  )}
                 </p>
               )}
               <Button type="submit" disabled={isSubmitting || loginMutation.isPending}>

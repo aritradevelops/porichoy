@@ -31,8 +31,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // Single source of truth for the React-visible session state: fires on login/logout below,
   // and on http.ts's own 401 handling clearing the token-store directly — so an
   // expired/rejected token tears down the session (and triggers RequireAuth's redirect) no
-  // matter which call site discovered it.
-  useEffect(() => subscribeAccessToken(() => setToken(getAccessToken())), [])
+  // matter which call site discovered it. Whenever the token becomes null, the cached
+  // /auth/me data is dropped here too — not just in logout() — so a 401 discovered mid-session
+  // (not via the Sign-out button) can't leave a previous session's identity/permissions
+  // visible in the UI once a new session starts on the same tab.
+  useEffect(() => {
+    return subscribeAccessToken(() => {
+      const token = getAccessToken()
+      setToken(token)
+      if (!token) {
+        queryClient.removeQueries({ queryKey: meQueryKey })
+      }
+    })
+  }, [queryClient])
 
   function login(auth: AuthResponse) {
     setAccessToken(auth.access_token)
@@ -41,7 +52,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   function logout() {
     setAccessToken(null)
-    queryClient.removeQueries({ queryKey: meQueryKey })
   }
 
   return (
