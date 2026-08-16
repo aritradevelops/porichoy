@@ -122,3 +122,21 @@ func (r *UserRepository) FindByEmail(ctx context.Context, tenantID uuid.UUID, em
 	}
 	return userFromModel(m), nil
 }
+
+// FindByID is a tenant-scoped self-lookup by primary key (identity.Repository) — backs GET
+// /auth/me. Returns nil, nil if no active user with this id exists within tenantID.
+func (r *UserRepository) FindByID(ctx context.Context, tenantID, id uuid.UUID) (*identity.User, error) {
+	m := new(userModel)
+	err := dbFromContext(ctx, r.db).NewSelect().Model(m).
+		Where("tenant_id = ?", tenantID).
+		Where("id = ?", id).
+		Where("deleted_at IS NULL").
+		Scan(ctx)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return userFromModel(m), nil
+}

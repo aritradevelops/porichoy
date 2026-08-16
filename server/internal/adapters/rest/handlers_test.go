@@ -167,6 +167,21 @@ func TestTenantResolution_UnregisteredHost(t *testing.T) {
 	require.Equal(t, http.StatusNotFound, resp.StatusCode)
 }
 
+// A request's Host header carries a port whenever the client connects to anything other than
+// the default 80/443 (any local dev setup, or a non-standard-port deployment) — this must
+// still resolve against the plain-hostname domain registered in domain_registry.
+func TestTenantResolution_HostHeaderWithPort(t *testing.T) {
+	ta := newTestApp(t)
+	ta.tenants.On("GetByID", mock.Anything, mock.Anything, ta.tenantID).
+		Return(&tenant.Tenant{ID: ta.tenantID, Name: "Acme"}, nil)
+	req := httptest.NewRequest(http.MethodGet, "http://"+testHost+":5173/api/v1/tenants/get/"+ta.tenantID.String(), nil)
+	req.Header.Set("Authorization", "Bearer "+ta.token)
+
+	resp, err := ta.app.Test(req)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+}
+
 func TestAuthentication_NoToken(t *testing.T) {
 	ta := newTestApp(t)
 

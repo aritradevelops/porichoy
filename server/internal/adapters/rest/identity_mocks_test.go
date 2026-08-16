@@ -29,6 +29,12 @@ func (m *mockUserRepo) FindByEmail(ctx context.Context, tenantID uuid.UUID, emai
 	return u, args.Error(1)
 }
 
+func (m *mockUserRepo) FindByID(ctx context.Context, tenantID, id uuid.UUID) (*identity.User, error) {
+	args := m.Called(ctx, tenantID, id)
+	u, _ := args.Get(0).(*identity.User)
+	return u, args.Error(1)
+}
+
 type mockPasswordRepo struct{ mock.Mock }
 
 func (m *mockPasswordRepo) Create(ctx context.Context, p *identity.Password) error {

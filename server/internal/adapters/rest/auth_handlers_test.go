@@ -313,3 +313,66 @@ func TestAuth_Login_LoginMethodDisabled(t *testing.T) {
 	require.Equal(t, http.StatusBadRequest, status)
 	require.Equal(t, "identity.login_method_disabled", env.Error.Key)
 }
+
+func TestAuth_Me_OK(t *testing.T) {
+	ta := newTestApp(t)
+	email, displayName := "me@example.com", "Jane Doe"
+	ta.users.On("FindByID", mock.Anything, ta.tenantID, ta.principalID).
+		Return(&identity.User{ID: ta.principalID, TenantID: ta.tenantID, Email: &email, DisplayName: &displayName}, nil)
+
+	status, env := ta.do(t, http.MethodGet, "/api/v1/auth/me", nil, nil)
+
+	require.Equal(t, http.StatusOK, status)
+	require.Nil(t, env.Error)
+	data := env.Data.(map[string]any)
+	require.Equal(t, ta.principalID.String(), data["user_id"])
+	require.Equal(t, email, data["email"])
+	require.Equal(t, displayName, data["display_name"])
+	require.Equal(t, ta.tenantID.String(), data["tenant_id"])
+	require.Equal(t, "Acme", data["tenant_name"])
+	permsRaw, ok := data["permissions"].([]any)
+	require.True(t, ok)
+	perms := make([]string, len(permsRaw))
+	for i, p := range permsRaw {
+		perms[i] = p.(string)
+	}
+	require.ElementsMatch(t, testTenantScopePermissions, perms)
+}
+
+// AuthenticateOnly deliberately runs no ResolveScope check (middleware.go's own doc comment
+// explains why), so a cache miss here must not 403 the way it would for every other
+// authenticated route — it's legitimate empty state, reported as an empty list.
+func TestAuth_Me_NoCachedPermissions(t *testing.T) {
+	ta := newTestApp(t)
+	email := "no-perms@example.com"
+	ta.users.On("FindByID", mock.Anything, ta.tenantID, ta.principalID).
+		Return(&identity.User{ID: ta.principalID, TenantID: ta.tenantID, Email: &email}, nil)
+	ta.permCache.ExpectedCalls = nil
+	ta.permCache.On("GetUserPermissions", mock.Anything, ta.appID, ta.principalID).Return(nil, nil)
+
+	status, env := ta.do(t, http.MethodGet, "/api/v1/auth/me", nil, nil)
+
+	require.Equal(t, http.StatusOK, status)
+	require.Nil(t, env.Error)
+	data := env.Data.(map[string]any)
+	require.Empty(t, data["permissions"])
+}
+
+func TestAuth_Me_UserGone(t *testing.T) {
+	ta := newTestApp(t)
+	ta.users.On("FindByID", mock.Anything, ta.tenantID, ta.principalID).Return(nil, nil)
+
+	status, env := ta.do(t, http.MethodGet, "/api/v1/auth/me", nil, nil)
+
+	require.Equal(t, http.StatusUnauthorized, status)
+	require.Equal(t, "identity.unauthenticated", env.Error.Key)
+}
+
+func TestAuth_Me_NoToken(t *testing.T) {
+	ta := newTestApp(t)
+
+	status, env := ta.do(t, http.MethodGet, "/api/v1/auth/me", nil, map[string]string{"Authorization": ""})
+
+	require.Equal(t, http.StatusUnauthorized, status)
+	require.Equal(t, "identity.unauthenticated", env.Error.Key)
+}
