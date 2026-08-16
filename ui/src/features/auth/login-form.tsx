@@ -1,7 +1,12 @@
 import { zodResolver } from '@hookform/resolvers/zod'
 import { FingerprintIcon, MailIcon } from 'lucide-react'
 import { useForm } from 'react-hook-form'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { z } from 'zod'
+import { ApiError } from '@/lib/client/http'
+import { useAuth } from '@/lib/client/auth-context'
+import { useLoginMutation } from '@/lib/client/auth'
+import type { LocationWithFrom } from '@/lib/client/require-auth'
 import { AppleIcon, GoogleIcon } from '@/components/brand-icons'
 import { Button } from '@/components/ui/button'
 import {
@@ -37,11 +42,11 @@ type LoginFormValues = z.infer<typeof loginSchema>
 // adapted from shadcn's login-03 block, reskinned onto our own design tokens
 // (UI_CODING_STANDARDS.md §5.1).
 //
-// Only email+password is wired up. The other methods a tenant can enable
-// (email/phone OTP, WebAuthn, Google, Apple — PRD §5.1) are non-functional
-// placeholders: this can't yet know which methods a tenant actually has
-// enabled, since lib/client (the piece that would fetch tenant config and
-// call the auth API) doesn't exist yet (UI_CODING_STANDARDS.md §3, §13).
+// Only email+password is wired up, against POST /api/v1/auth/login (lib/client/auth.ts) — the
+// only login method identity.Service implements server-side this pass. The other methods a
+// tenant can enable (email/phone OTP, WebAuthn, Google, Apple — PRD §5.1) stay non-functional
+// placeholders: this can't yet know which methods a tenant actually has enabled, since nothing
+// fetches tenant config to check (no endpoint exposes it — see domain_handlers.go's Resolve).
 export function LoginForm() {
   const {
     register,
@@ -50,10 +55,19 @@ export function LoginForm() {
   } = useForm<LoginFormValues>({
     resolver: zodResolver(loginSchema),
   })
+  const { login } = useAuth()
+  const loginMutation = useLoginMutation()
+  const navigate = useNavigate()
+  const location = useLocation() as LocationWithFrom
 
-  function onSubmit(_values: LoginFormValues) {
-    // TODO: call lib/client's auth endpoint once it exists. For now this is a
-    // structural placeholder — see the module comment above.
+  async function onSubmit(values: LoginFormValues) {
+    try {
+      const auth = await loginMutation.mutateAsync(values)
+      login(auth)
+      navigate(location.state?.from?.pathname ?? '/', { replace: true })
+    } catch {
+      // loginMutation.error already carries the failure — surfaced below, nothing more to do.
+    }
   }
 
   return (
@@ -126,7 +140,12 @@ export function LoginForm() {
             </Field>
 
             <Field>
-              <Button type="submit" disabled={isSubmitting}>
+              {loginMutation.error instanceof ApiError && (
+                <p className="text-destructive text-center text-sm" role="alert">
+                  {loginMutation.error.message}
+                </p>
+              )}
+              <Button type="submit" disabled={isSubmitting || loginMutation.isPending}>
                 Sign in
               </Button>
               <FieldDescription className="text-center">
