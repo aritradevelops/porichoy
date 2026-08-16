@@ -29,3 +29,4 @@ venv/
 # Config with secrets
 *.local.yaml
 *.local.yml
+.personal
